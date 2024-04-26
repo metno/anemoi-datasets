@@ -108,7 +108,7 @@ def compute_statistics(array, check_variables_names=None, allow_nan=False):
     }
 
 
-class TempStatistics:
+class TmpStatistics:
     version = 3
     # Used in parrallel, during data loading,
     # to write statistics in pickled npz files.
@@ -162,7 +162,7 @@ class TempStatistics:
         return aggregator.aggregate()
 
     def __str__(self):
-        return f"TempStatistics({self.dirname})"
+        return f"TmpStatistics({self.dirname})"
 
 
 def normalise_date(d):

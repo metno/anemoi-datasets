@@ -24,7 +24,7 @@ from .check import check_data_values
 from .config import build_output
 from .config import loader_config
 from .input import build_input
-from .statistics import TempStatistics
+from .statistics import TmpStatistics
 from .statistics import compute_statistics
 from .utils import bytes
 from .utils import compute_directory_sizes
@@ -96,7 +96,7 @@ class Loader:
 
         statistics_tmp = kwargs.get("statistics_tmp") or self.path + ".statistics"
 
-        self.statistics_registry = TempStatistics(statistics_tmp)
+        self.tmp_statistics = TmpStatistics(statistics_tmp)
 
     @classmethod
     def from_config(cls, *, config, path, print=print, **kwargs):
@@ -201,7 +201,7 @@ class InitialiseLoader(Loader):
         super().__init__(**kwargs)
         self.main_config = loader_config(config)
 
-        self.statistics_registry.delete()
+        self.tmp_statistics.delete()
 
         LOG.info(self.main_config.dates)
         self.groups = Groups(**self.main_config.dates)
@@ -330,8 +330,8 @@ class InitialiseLoader(Loader):
         self._add_dataset(name="longitudes", array=grid_points[1])
 
         self.registry.create(lengths=lengths)
-        self.statistics_registry.create(exist_ok=False)
-        self.registry.add_to_history("statistics_registry_initialised", version=self.statistics_registry.version)
+        self.tmp_statistics.create(exist_ok=False)
+        self.registry.add_to_history("tmp_statistics_initialised", version=self.tmp_statistics.version)
 
         statistics_start, statistics_end = self.build_statistics_dates(
             self.main_config.statistics.get("start"),
@@ -392,7 +392,7 @@ class ContentLoader(Loader):
 
         self.registry.add_to_history("loading_data_end", parts=self.parts)
         self.registry.add_provenance(name="provenance_load")
-        self.statistics_registry.add_provenance(name="provenance_load", config=self.main_config)
+        self.tmp_statistics.add_provenance(name="provenance_load", config=self.main_config)
 
         self.print_info()
 
@@ -430,7 +430,7 @@ class ContentLoader(Loader):
         self.load_cube(cube, array)
 
         stats = compute_statistics(array.cache, self.variables_names, allow_nan=self.allow_nan)
-        self.statistics_registry.write(indexes, stats, dates=dates_in_data)
+        self.tmp_statistics.write(indexes, stats, dates=dates_in_data)
 
         array.flush()
 
@@ -543,7 +543,7 @@ class StatisticsLoader(Loader):
 
     def run(self):
         dates = self._get_statistics_dates()
-        stats = self.statistics_registry.get_aggregated(dates, self.variables_names, self.allow_nan)
+        stats = self.tmp_statistics.get_aggregated(dates, self.variables_names, self.allow_nan)
         self.output_writer(stats)
 
     def write_stats_to_file(self, stats):
@@ -591,5 +591,5 @@ class SizeLoader(Loader):
 
 class CleanupLoader(Loader):
     def run(self):
-        self.statistics_registry.delete()
+        self.tmp_statistics.delete()
         self.registry.clean()
