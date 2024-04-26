@@ -74,37 +74,6 @@ class GenericDatasetHandler:
         assert os.path.exists(path), f"Path {path} does not exist."
         return cls(path=path, **kwargs)
 
-    def build_input(self):
-        from climetlab.core.order import build_remapping
-
-        builder = build_input(
-            self.main_config.input,
-            data_sources=self.main_config.get("data_sources", {}),
-            order_by=self.output.order_by,
-            flatten_grid=self.output.flatten_grid,
-            remapping=build_remapping(self.output.remapping),
-        )
-        LOG.info("✅ INPUT_BUILDER")
-        LOG.info(builder)
-        return builder
-
-    def build_statistics_dates(self, start, end):
-        ds = open_dataset(self.path)
-        dates = ds.dates
-
-        default_start, default_end = default_statistics_dates(dates)
-        if start is None:
-            start = default_start
-        if end is None:
-            end = default_end
-
-        start = as_first_date(start, dates)
-        end = as_last_date(end, dates)
-
-        start = start.astype(datetime.datetime)
-        end = end.astype(datetime.datetime)
-        return (start.isoformat(), end.isoformat())
-
     def read_dataset_metadata(self):
         ds = open_dataset(self.path)
         self.dataset_shape = ds.shape
@@ -116,16 +85,9 @@ class GenericDatasetHandler:
         self.missing_dates = z.attrs.get("missing_dates", [])
         self.missing_dates = [np.datetime64(d) for d in self.missing_dates]
 
-    def allow_nan(self, name):
-        return name in self.main_config.statistics.get("allow_nans", [])
-
     @cached_property
     def registry(self):
         return ZarrBuiltRegistry(self.path)
-
-    def initialise_dataset_backend(self):
-        z = zarr.open(self.path, mode="w")
-        z.create_group("_build")
 
     def update_metadata(self, **kwargs):
         LOG.info(f"Updating metadata {kwargs}")
@@ -158,10 +120,25 @@ class DatasetHandler(GenericDatasetHandler):
 
 
 class Loader(GenericDatasetHandler):
-    pass
+    def build_input(self):
+        from climetlab.core.order import build_remapping
+
+        builder = build_input(
+            self.main_config.input,
+            data_sources=self.main_config.get("data_sources", {}),
+            order_by=self.output.order_by,
+            flatten_grid=self.output.flatten_grid,
+            remapping=build_remapping(self.output.remapping),
+        )
+        LOG.info("✅ INPUT_BUILDER")
+        LOG.info(builder)
+        return builder
+
+    def allow_nan(self, name):
+        return name in self.main_config.statistics.get("allow_nans", [])
 
 
-class Initialiser(Loader):
+class InitialiserLoader(Loader):
     def __init__(self, config, **kwargs):
         super().__init__(**kwargs)
         self.main_config = loader_config(config)
@@ -181,6 +158,27 @@ class Initialiser(Loader):
         LOG.info(self.groups)
         LOG.info("MINIMAL INPUT :")
         LOG.info(self.minimal_input)
+
+    def build_statistics_dates(self, start, end):
+        ds = open_dataset(self.path)
+        dates = ds.dates
+
+        default_start, default_end = default_statistics_dates(dates)
+        if start is None:
+            start = default_start
+        if end is None:
+            end = default_end
+
+        start = as_first_date(start, dates)
+        end = as_last_date(end, dates)
+
+        start = start.astype(datetime.datetime)
+        end = end.astype(datetime.datetime)
+        return (start.isoformat(), end.isoformat())
+
+    def initialise_dataset_backend(self):
+        z = zarr.open(self.path, mode="w")
+        z.create_group("_build")
 
     def initialise(self, check_name=True):
         """Create empty dataset."""
@@ -441,7 +439,7 @@ class ContentLoader(Loader):
         LOG.info(msg)
 
 
-class StatisticsLoader(GenericDatasetHandler):
+class StatisticsLoader(Loader):
     main_config = {}
 
     def __init__(

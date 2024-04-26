@@ -32,13 +32,13 @@ class Creator:
         # check path
         _, ext = os.path.splitext(self.path)
         assert ext != "zarr", f"Unsupported extension={ext}"
-        from .loaders import Initialiser
+        from .loaders import InitialiserLoader
 
         if self._path_readable() and not self.overwrite:
             raise Exception(f"{self.path} already exists. Use overwrite=True to overwrite.")
 
         with self._cache_context():
-            obj = Initialiser.from_config(
+            obj = InitialiserLoader.from_config(
                 path=self.path,
                 config=self.config,
                 statistics_tmp=self.statistics_tmp,
@@ -84,11 +84,7 @@ class Creator:
     def cleanup(self):
         from .loaders import DatasetHandler
 
-        cleaner = DatasetHandler.from_dataset(
-            path=self.path,
-            print=self.print,
-            statistics_tmp=self.statistics_tmp,
-        )
+        cleaner = DatasetHandler.from_dataset(path=self.path, print=self.print, statistics_tmp=self.statistics_tmp)
         cleaner.tmp_statistics.delete()
         cleaner.registry.clean()
 
