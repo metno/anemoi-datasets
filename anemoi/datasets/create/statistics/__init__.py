@@ -20,11 +20,53 @@ from collections import defaultdict
 import numpy as np
 from anemoi.utils.provenance import gather_provenance_info
 
-from .check import StatisticsValueError
-from .check import check_data_values
-from .check import check_stats
+from ..check import StatisticsValueError
+from ..check import check_data_values
+from ..check import check_stats
 
 LOG = logging.getLogger(__name__)
+
+
+def default_statistics_dates(dates):
+    """
+    Calculate default statistics dates based on the given list of dates.
+
+    Args:
+        dates (list): List of datetime objects representing dates.
+
+    Returns:
+        tuple: A tuple containing the default start and end dates.
+    """
+
+    def to_datetime(d):
+        if isinstance(d, np.datetime64):
+            return d.tolist()
+        assert isinstance(d, datetime.datetime), d
+        return d
+
+    first = dates[0]
+    last = dates[-1]
+
+    first = to_datetime(first)
+    last = to_datetime(last)
+
+    n_years = round((last - first).total_seconds() / (365.25 * 24 * 60 * 60))
+
+    if n_years < 10:
+        # leave out 20% of the data
+        k = int(len(dates) * 0.8)
+        end = dates[k - 1]
+        LOG.info(f"Number of years {n_years} < 10, leaving out 20%. {end=}")
+        return dates[0], end
+
+    delta = 1
+    if n_years >= 20:
+        delta = 3
+    LOG.info(f"Number of years {n_years}, leaving out {delta} years.")
+    end_year = last.year - delta
+
+    end = max(d for d in dates if to_datetime(d).year == end_year)
+    return dates[0], end
 
 
 def to_datetime(date):

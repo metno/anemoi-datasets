@@ -32,13 +32,13 @@ class Creator:
         # check path
         _, ext = os.path.splitext(self.path)
         assert ext != "zarr", f"Unsupported extension={ext}"
-        from .loaders import InitialiseLoader
+        from .loaders import Initialiser
 
         if self._path_readable() and not self.overwrite:
             raise Exception(f"{self.path} already exists. Use overwrite=True to overwrite.")
 
         with self._cache_context():
-            obj = InitialiseLoader.from_config(
+            obj = Initialiser.from_config(
                 path=self.path,
                 config=self.config,
                 statistics_tmp=self.statistics_tmp,
@@ -74,20 +74,21 @@ class Creator:
         loader.run()
 
     def size(self):
-        from .loaders import SizeLoader
+        from .size import SizeAdder
 
-        loader = SizeLoader.from_dataset(path=self.path, print=self.print)
+        loader = SizeAdder.from_dataset(path=self.path, print=self.print)
         loader.add_total_size()
 
     def cleanup(self):
-        from .loaders import CleanupLoader
+        from .loaders import DatasetHandler
 
-        loader = CleanupLoader.from_dataset(
+        cleaner = DatasetHandler.from_dataset(
             path=self.path,
             print=self.print,
             statistics_tmp=self.statistics_tmp,
         )
-        loader.run()
+        cleaner.tmp_statistics.delete()
+        cleaner.registry.clean()
 
     def patch(self, **kwargs):
         from .patch import apply_patch

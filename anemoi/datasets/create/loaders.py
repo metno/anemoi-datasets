@@ -27,8 +27,7 @@ from .config import loader_config
 from .input import build_input
 from .statistics import TmpStatistics
 from .statistics import compute_statistics
-from .utils import bytes
-from .utils import compute_directory_sizes
+from .statistics import default_statistics_dates
 from .utils import normalize_and_check_dates
 from .utils import progress_bar
 from .utils import seconds
@@ -41,49 +40,7 @@ LOG = logging.getLogger(__name__)
 VERSION = "0.20"
 
 
-def default_statistics_dates(dates):
-    """
-    Calculate default statistics dates based on the given list of dates.
-
-    Args:
-        dates (list): List of datetime objects representing dates.
-
-    Returns:
-        tuple: A tuple containing the default start and end dates.
-    """
-
-    def to_datetime(d):
-        if isinstance(d, np.datetime64):
-            return d.tolist()
-        assert isinstance(d, datetime.datetime), d
-        return d
-
-    first = dates[0]
-    last = dates[-1]
-
-    first = to_datetime(first)
-    last = to_datetime(last)
-
-    n_years = round((last - first).total_seconds() / (365.25 * 24 * 60 * 60))
-
-    if n_years < 10:
-        # leave out 20% of the data
-        k = int(len(dates) * 0.8)
-        end = dates[k - 1]
-        LOG.info(f"Number of years {n_years} < 10, leaving out 20%. {end=}")
-        return dates[0], end
-
-    delta = 1
-    if n_years >= 20:
-        delta = 3
-    LOG.info(f"Number of years {n_years}, leaving out {delta} years.")
-    end_year = last.year - delta
-
-    end = max(d for d in dates if to_datetime(d).year == end_year)
-    return dates[0], end
-
-
-class Loader:
+class GenericDatasetHandler:
     def __init__(self, *, path, print=print, **kwargs):
         # Catch all floating point errors, including overflow, sqrt(<0), etc
         np.seterr(all="raise", under="warn")
@@ -94,7 +51,7 @@ class Loader:
         self.kwargs = kwargs
         self.print = print
 
-        statistics_tmp = kwargs.get("statistics_tmp") or self.path + ".statistics"
+        statistics_tmp = kwargs.get("statistics_tmp") or os.path.join(self.path + ".tmp_data", "statistics")
 
         self.tmp_statistics = TmpStatistics(statistics_tmp)
 
@@ -196,7 +153,15 @@ class Loader:
             LOG.info(e)
 
 
-class InitialiseLoader(Loader):
+class DatasetHandler(GenericDatasetHandler):
+    pass
+
+
+class Loader(GenericDatasetHandler):
+    pass
+
+
+class Initialiser(Loader):
     def __init__(self, config, **kwargs):
         super().__init__(**kwargs)
         self.main_config = loader_config(config)
@@ -476,7 +441,7 @@ class ContentLoader(Loader):
         LOG.info(msg)
 
 
-class StatisticsLoader(Loader):
+class StatisticsLoader(GenericDatasetHandler):
     main_config = {}
 
     def __init__(
@@ -570,26 +535,3 @@ class StatisticsLoader(Loader):
 
     def write_stats_to_stdout(self, stats):
         LOG.info(stats)
-
-
-class SizeLoader(Loader):
-    def __init__(self, path, print):
-        self.path = path
-        self.print = print
-
-    def add_total_size(self):
-        dic = compute_directory_sizes(self.path)
-
-        size = dic["total_size"]
-        n = dic["total_number_of_files"]
-
-        LOG.info(f"Total size: {bytes(size)}")
-        LOG.info(f"Total number of files: {n}")
-
-        self.update_metadata(total_size=size, total_number_of_files=n)
-
-
-class CleanupLoader(Loader):
-    def run(self):
-        self.tmp_statistics.delete()
-        self.registry.clean()
