@@ -12,8 +12,6 @@ import os
 
 from anemoi.datasets.create.utils import progress_bar
 
-from .loaders import GenericDatasetHandler
-
 LOG = logging.getLogger(__name__)
 
 
@@ -29,21 +27,7 @@ def compute_directory_sizes(path):
             size += os.path.getsize(file_path)
             n += 1
 
+    LOG.info(f"Total size: {bytes(size)}")
+    LOG.info(f"Total number of files: {n}")
+
     return dict(total_size=size, total_number_of_files=n)
-
-
-class SizeAdder(GenericDatasetHandler):
-    def __init__(self, path, print):
-        self.path = path
-        self.print = print
-
-    def add_total_size(self):
-        dic = compute_directory_sizes(self.path)
-
-        size = dic["total_size"]
-        n = dic["total_number_of_files"]
-
-        LOG.info(f"Total size: {bytes(size)}")
-        LOG.info(f"Total number of files: {n}")
-
-        self.update_metadata(total_size=size, total_number_of_files=n)

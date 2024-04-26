@@ -74,10 +74,12 @@ class Creator:
         loader.run()
 
     def size(self):
-        from .size import SizeAdder
+        from .loaders import DatasetHandler
+        from .size import compute_directory_sizes
 
-        loader = SizeAdder.from_dataset(path=self.path, print=self.print)
-        loader.add_total_size()
+        metadata = compute_directory_sizes(self.path)
+        handle = DatasetHandler.from_dataset(path=self.path, print=self.print)
+        handle.update_metadata(**metadata)
 
     def cleanup(self):
         from .loaders import DatasetHandler
