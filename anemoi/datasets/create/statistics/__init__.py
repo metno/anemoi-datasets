@@ -15,14 +15,12 @@ import os
 import pickle
 import shutil
 import socket
-from collections import defaultdict
 
 import numpy as np
 from anemoi.utils.provenance import gather_provenance_info
 
-from ..check import StatisticsValueError
 from ..check import check_data_values
-from ..check import check_stats
+from .summary import Summary
 
 LOG = logging.getLogger(__name__)
 
@@ -331,7 +329,7 @@ class StatAggregator:
                 allow_nan=False,
             )
 
-        return Statistics(
+        return Summary(
             minimum=minimum,
             maximum=maximum,
             mean=mean,
@@ -342,84 +340,3 @@ class StatAggregator:
             variables_names=self.variables_names,
             has_nans=has_nans,
         )
-
-
-class Statistics(dict):
-    STATS_NAMES = ["minimum", "maximum", "mean", "stdev", "has_nans"]  # order matter for __str__.
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.check()
-
-    @property
-    def size(self):
-        return len(self["variables_names"])
-
-    def check(self):
-        for k, v in self.items():
-            if k == "variables_names":
-                assert len(v) == self.size
-                continue
-            assert v.shape == (self.size,)
-            if k == "count":
-                assert (v >= 0).all(), (k, v)
-                assert v.dtype == np.int64, (k, v)
-                continue
-            if k == "has_nans":
-                assert v.dtype == np.bool_, (k, v)
-                continue
-            if k == "stdev":
-                assert (v >= 0).all(), (k, v)
-            assert v.dtype == np.float64, (k, v)
-
-        for i, name in enumerate(self["variables_names"]):
-            try:
-                check_stats(**{k: v[i] for k, v in self.items()}, msg=f"{i} {name}")
-                check_data_values(self["minimum"][i], name=name)
-                check_data_values(self["maximum"][i], name=name)
-                check_data_values(self["mean"][i], name=name)
-            except StatisticsValueError as e:
-                e.args += (i, name)
-                raise
-
-    def __str__(self):
-        header = ["Variables"] + self.STATS_NAMES
-        out = [" ".join(header)]
-
-        out += [
-            " ".join([v] + [f"{self[n][i]:.2f}" for n in self.STATS_NAMES])
-            for i, v in enumerate(self["variables_names"])
-        ]
-        return "\n".join(out)
-
-    def save(self, filename, provenance=None):
-        assert filename.endswith(".json"), filename
-        dic = {}
-        for k in self.STATS_NAMES:
-            dic[k] = list(self[k])
-
-        out = dict(data=defaultdict(dict))
-        for i, name in enumerate(self["variables_names"]):
-            for k in self.STATS_NAMES:
-                out["data"][name][k] = dic[k][i]
-
-        out["provenance"] = provenance
-
-        with open(filename, "w") as f:
-            json.dump(out, f, indent=2)
-
-    def load(self, filename):
-        assert filename.endswith(".json"), filename
-        with open(filename) as f:
-            dic = json.load(f)
-
-        dic_ = {}
-        for k, v in dic.items():
-            if k == "count":
-                dic_[k] = np.array(v, dtype=np.int64)
-                continue
-            if k == "variables":
-                dic_[k] = v
-                continue
-            dic_[k] = np.array(v, dtype=np.float64)
-        return Statistics(dic_)
