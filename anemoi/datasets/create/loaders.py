@@ -21,6 +21,7 @@ from anemoi.datasets.dates.groups import Groups
 
 from .check import DatasetName
 from .check import check_data_values
+from .chunks import ChunkFilter
 from .config import build_output
 from .config import loader_config
 from .input import build_input
@@ -31,7 +32,6 @@ from .utils import compute_directory_sizes
 from .utils import normalize_and_check_dates
 from .utils import progress_bar
 from .utils import seconds
-from .writer import CubesFilter
 from .writer import ViewCacheArray
 from .zarr import ZarrBuiltRegistry
 from .zarr import add_zarr_dataset
@@ -360,7 +360,7 @@ class ContentLoader(Loader):
 
         self.parts = parts
         total = len(self.registry.get_flags())
-        self.cube_filter = CubesFilter(parts=self.parts, total=total)
+        self.chunk_filter = ChunkFilter(parts=self.parts, total=total)
 
         self.data_array = zarr.open(self.path, mode="r+")["data"]
         self.n_groups = len(self.groups)
@@ -369,7 +369,7 @@ class ContentLoader(Loader):
         self.registry.add_to_history("loading_data_start", parts=self.parts)
 
         for igroup, group in enumerate(self.groups):
-            if not self.cube_filter(igroup):
+            if not self.chunk_filter(igroup):
                 continue
             if self.registry.get_flag(igroup):
                 LOG.info(f" -> Skipping {igroup} total={len(self.groups)} (already done)")
