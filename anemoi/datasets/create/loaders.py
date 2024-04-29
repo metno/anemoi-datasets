@@ -658,7 +658,7 @@ class AdditionsLoader(GenericDatasetHandler):
 
     def finalise(self):
         self.shape = (len(self.dates), len(self.variables_names))
-        LOG.info(f"Aggregating statistics on shape={self.shape}. Variables : {self.variables_names}")
+        LOG.info(f"Aggregating {self.name} statistics on shape={self.shape}. Variables : {self.variables_names}")
 
         agg = self._get_empty_stats_dict(self.shape)
 
@@ -674,7 +674,7 @@ class AdditionsLoader(GenericDatasetHandler):
 
             assert isinstance(stats, dict), stats
             shape = stats["minimum"].shape
-            assert shape[0] == len(dates), (shape, len(_dates))
+            assert shape[0] == len(dates), (shape, len(dates))
             assert shape[0] == len(_dates), (shape, len(_dates))
             assert shape[1] == len(self.variables_names), (shape, len(self.variables_names))
 
