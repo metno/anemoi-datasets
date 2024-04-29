@@ -137,7 +137,6 @@ def compute_statistics(array, check_variables_names=None, allow_nan=False):
         sums[i] = np.nansum(values, axis=1)
         squares[i] = np.nansum(values * values, axis=1)
         count[i] = np.sum(~np.isnan(values), axis=1)
-        print(".❌", i, count[i], sums[i], squares[i], ":", values.shape, array.shape)
         has_nans[i] = np.isnan(values).any()
 
     return {
@@ -311,7 +310,6 @@ class StatAggregator:
         count = np.nansum(self.count, axis=0)
         has_nans = np.any(self.has_nans, axis=0)
         mean = sums / count
-        print(f"Aggregate {sums=} {count=} -> {mean=}")
 
         assert sums.shape == count.shape == squares.shape == mean.shape == minimum.shape == maximum.shape
 

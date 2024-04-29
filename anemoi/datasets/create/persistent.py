@@ -62,6 +62,9 @@ class PersistentDict:
         with open(os.path.join(self.dirname, "provenance.json"), "w") as f:
             json.dump(out, f)
 
+    def add(self, elt, *, key):
+        self[key] = elt
+
     def __setitem__(self, key, elt):
         h = hashlib.sha256(str(key).encode("utf-8")).hexdigest()
         path = os.path.join(self.dirname, f"{h}.pickle")
@@ -75,6 +78,44 @@ class PersistentDict:
         shutil.move(tmp_path, path)
 
         LOG.debug(f"Written {self.name} data for len {key} in {path}")
+
+    def flush(self):
+        pass
+
+
+class BufferedPersistentDict(PersistentDict):
+    def __init__(self, buffer_size=1000, **kwargs):
+        self.buffer_size = buffer_size
+        self.elements = []
+        self.keys = []
+        self.storage = PersistentDict(**kwargs)
+
+    def add(self, elt, *, key):
+        self.elements.append(elt)
+        self.keys.append(key)
+        if len(self.keys) > self.buffer_size:
+            self.flush()
+
+    def flush(self):
+        k = sorted(self.keys)
+        self.storage.add(self.elements, key=k)
+        self.elements = []
+        self.keys = []
+
+    def items(self):
+        for keys, elements in self.storage.items():
+            for key, elt in zip(keys, elements):
+                yield key, elt
+
+    def delete(self):
+        self.storage.delete()
+
+    def create(self):
+        self.storage.create()
+
+
+def build_storage(directory, create=True):
+    return BufferedPersistentDict(directory=directory, create=create)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ import zarr
 
 from anemoi.datasets import MissingDateError
 from anemoi.datasets import open_dataset
-from anemoi.datasets.create.persistent import PersistentDict
+from anemoi.datasets.create.persistent import build_storage
 from anemoi.datasets.data.misc import as_first_date
 from anemoi.datasets.data.misc import as_last_date
 from anemoi.datasets.dates.groups import Groups
@@ -574,7 +574,7 @@ class AdditionsLoader(GenericDatasetHandler):
 
         self.name = name
         storage_path = os.path.join(self.path + ".tmp_data", name)
-        self.tmp_storage = PersistentDict(directory=storage_path, create=True)
+        self.tmp_storage = build_storage(directory=storage_path, create=True)
 
     def initialise(self):
         self.tmp_storage.delete()
@@ -611,9 +611,9 @@ class AdditionsLoader(GenericDatasetHandler):
         return None
 
     def allow_nan(self, name):
-        if self._variables_with_nans:
+        if self._variables_with_nans is not None:
             return name in self._variables_with_nans
-        warnings.warn(f"❗Cannot find 'variables_with_nans' in {self.path}. Assuming nans allowed for {name}.")
+        warnings.warn(f"❗Cannot find 'variables_with_nans' in {self.path}, Assuming nans allowed for {name}.")
         return True
 
     def run(self, parts):
@@ -634,7 +634,8 @@ class AdditionsLoader(GenericDatasetHandler):
                 missing_dates = [date]
 
             dates = sorted(dates_ok + missing_dates)
-            self.tmp_storage[dates] = [dates_ok, missing_dates, i, stats]
+            self.tmp_storage.add([dates_ok, missing_dates, i, stats], key=dates)
+        self.tmp_storage.flush()
 
         LOG.info(f"Dataset {self.path} additions run.")
 
@@ -716,7 +717,6 @@ class AdditionsLoader(GenericDatasetHandler):
         assert sums.shape == has_nans.shape
 
         mean = sums / count
-        print(f"Aggregate {sums=} {count=} -> {mean=}")
         assert sums.shape == mean.shape
 
         x = squares / count - mean * mean
@@ -752,8 +752,6 @@ class AdditionsLoader(GenericDatasetHandler):
     def check_statistics(self):
         ds = open_dataset(self.path)
         ref = ds.statistics
-        for k in ["mean", "stdev", "minimum", "maximum"]:
-            print("✅❌", k, ds.statistics[k], self.summary[k])
         for k in ds.statistics:
             assert np.all(np.isclose(ref[k], self.summary[k], rtol=1e-4, atol=1e-4)), (
                 k,
