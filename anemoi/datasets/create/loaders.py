@@ -15,6 +15,7 @@ from functools import cached_property
 import numpy as np
 import zarr
 
+from anemoi.datasets import MissingDateError
 from anemoi.datasets import open_dataset
 from anemoi.datasets.create.persistent import PersistentDict
 from anemoi.datasets.data.misc import as_first_date
@@ -27,7 +28,9 @@ from .chunks import ChunkFilter
 from .config import build_output
 from .config import loader_config
 from .input import build_input
+from .statistics import Summary
 from .statistics import TmpStatistics
+from .statistics import check_variance
 from .statistics import compute_statistics
 from .statistics import default_statistics_dates
 from .utils import normalize_and_check_dates
@@ -79,9 +82,12 @@ class GenericDatasetHandler:
         assert len(self.variables_names) == ds.shape[1], self.dataset_shape
         self.dates = ds.dates
 
+        self.missing_dates = sorted(list([self.dates[i] for i in ds.missing]))
+
         z = zarr.open(self.path, "r")
-        self.missing_dates = z.attrs.get("missing_dates", [])
-        self.missing_dates = [np.datetime64(d) for d in self.missing_dates]
+        missing_dates = z.attrs.get("missing_dates", [])
+        missing_dates = sorted([np.datetime64(d) for d in missing_dates])
+        assert missing_dates == self.missing_dates, (missing_dates, self.missing_dates)
 
     @cached_property
     def registry(self):
@@ -342,7 +348,7 @@ class ContentLoader(Loader):
             if self.registry.get_flag(igroup):
                 LOG.info(f" -> Skipping {igroup} total={len(self.groups)} (already done)")
                 continue
-            self.print(f" -> Processing {igroup} total={len(self.groups)}")
+            # self.print(f" -> Processing {igroup} total={len(self.groups)}")
             # print("========", group)
             assert isinstance(group[0], datetime.datetime), group
 
@@ -482,10 +488,7 @@ class StatisticsAdder(DatasetHandlerWithStatistics):
 
         # remove missing dates
         if self.missing_dates:
-            assert type(self.missing_dates[0]) is dtype, (
-                type(self.missing_dates[0]),
-                dtype,
-            )
+            assert_dtype(self.missing_dates[0])
         dates = [d for d in dates if d not in self.missing_dates]
 
         # filter dates according the the start and end dates in the metadata
@@ -531,7 +534,16 @@ class StatisticsAdder(DatasetHandlerWithStatistics):
         if not all(self.registry.get_flags(sync=False)):
             raise Exception(f"❗Zarr {self.path} is not fully built, not writting statistics into dataset.")
 
-        for k in ["mean", "stdev", "minimum", "maximum", "sums", "squares", "count", "has_nans"]:
+        for k in [
+            "mean",
+            "stdev",
+            "minimum",
+            "maximum",
+            "sums",
+            "squares",
+            "count",
+            "has_nans",
+        ]:
             self._add_dataset(name=k, array=stats[k])
 
         self.registry.add_to_history("compute_statistics_end")
@@ -542,9 +554,23 @@ class StatisticsAdder(DatasetHandlerWithStatistics):
 
 
 class AdditionsLoader(GenericDatasetHandler):
-    def __init__(self, name="additions", **kwargs):
+    def __init__(self, name="", **kwargs):
         super().__init__(**kwargs)
-        self.read_dataset_metadata()
+
+        self.dataset_shape = self.ds.shape
+        self.variables_names = self.ds.variables
+        assert len(self.variables_names) == self.ds.shape[1], self.dataset_shape
+        self.dates = self.ds.dates
+
+        self.missing_dates = sorted(list([self.dates[i] for i in self.ds.missing]))
+
+        def check_missing_dates(missing_dates):
+            z = zarr.open(self.path, "r")
+            m = z.attrs.get("missing_dates", [])
+            m = sorted([np.datetime64(d) for d in m])
+            assert m == missing_dates, (m, missing_dates)
+
+        check_missing_dates(self.missing_dates)
 
         self.name = name
         storage_path = os.path.join(self.path + ".tmp_data", name)
@@ -553,33 +579,184 @@ class AdditionsLoader(GenericDatasetHandler):
     def initialise(self):
         self.tmp_storage.delete()
         self.tmp_storage.create()
-        print("✅", self.tmp_storage)
         LOG.info(f"Dataset {self.path} additions initialized.")
 
     @property
     def total(self):
-        return len(self.dates)
+        return len(self.ds.dates)
 
     @cached_property
     def input_array(self):
-        return open_dataset(self.path)
+        return self.ds
+
+    @cached_property
+    def ds(self):
+        return open_dataset(self.path, start=self.start, end=self.end)
+
+    @cached_property
+    def start(self):
+        z = zarr.open(self.path, mode="r")
+        return z.attrs["statistics_start_date"]
+
+    @cached_property
+    def end(self):
+        z = zarr.open(self.path, mode="r")
+        return z.attrs["statistics_end_date"]
+
+    @cached_property
+    def _variables_with_nans(self):
+        z = zarr.open(self.path, mode="r")
+        if "variables_with_nans" in z.attrs:
+            return z.attrs["variables_with_nans"]
+        return None
+
+    def allow_nan(self, name):
+        if self._variables_with_nans:
+            return name in self._variables_with_nans
+        warnings.warn(f"❗Cannot find 'variables_with_nans' in {self.path}. Assuming nans allowed for {name}.")
+        return True
 
     def run(self, parts):
         chunk_filter = ChunkFilter(parts=parts, total=self.total)
-        for i in range(self.total):
+        for i in range(0, self.total):
             if not chunk_filter(i):
                 continue
             date = self.dates[i]
-            self.print(f" -> Processing {date} ({i+1}/{self.total})")
-            arr = self.input_array[i]
-            mean = arr.mean()
-            print(f"Shape: {arr.shape} Mean: {mean}")
-            self.tmp_storage[date] = [i, mean]
+            # self.print(f"{self.name} additions : Processing {date} ({i+1}/{self.total})")
+            try:
+                arr = self.input_array[i : i + 1, ...]
+                stats = compute_statistics(arr, self.variables_names, allow_nan=self.allow_nan)
+                dates_ok = [date]
+                missing_dates = []
+            except MissingDateError:
+                stats = None
+                dates_ok = []
+                missing_dates = [date]
+
+            dates = sorted(dates_ok + missing_dates)
+            self.tmp_storage[dates] = [dates_ok, missing_dates, i, stats]
+
         LOG.info(f"Dataset {self.path} additions run.")
 
+    @classmethod
+    def _check_type_equal(cls, a, b):
+        a = list(a)
+        b = list(b)
+        a = a[0] if a else None
+        b = b[0] if b else None
+        assert type(a) is type(b), (type(a), type(b))
+
+    def _get_empty_stats_dict(self, shape):
+        return dict(
+            minimum=np.full(self.shape, np.nan, dtype=np.float64),
+            maximum=np.full(self.shape, np.nan, dtype=np.float64),
+            sums=np.full(self.shape, np.nan, dtype=np.float64),
+            squares=np.full(self.shape, np.nan, dtype=np.float64),
+            count=np.full(self.shape, -1, dtype=np.int64),
+            has_nans=np.full(self.shape, False, dtype=np.bool_),
+        )
+
     def finalise(self):
-        for k, v in self.tmp_storage.items():
-            print(k, v)
-        # TODO aggregated
-        # self.tmp_storage.delete()
+        self.shape = (len(self.dates), len(self.variables_names))
+        LOG.info(f"Aggregating statistics on shape={self.shape}. Variables : {self.variables_names}")
+
+        agg = self._get_empty_stats_dict(self.shape)
+
+        found = set()
+        missing = set()
+        mask = []
+        for _dates, (dates, missing_dates, _, stats) in self.tmp_storage.items():
+            if missing_dates:
+                mask.append(False)
+                missing |= set(missing_dates)
+                continue
+            mask.append(True)
+
+            assert isinstance(stats, dict), stats
+            shape = stats["minimum"].shape
+            assert shape[0] == len(dates), (shape, len(_dates))
+            assert shape[0] == len(_dates), (shape, len(_dates))
+            assert shape[1] == len(self.variables_names), (shape, len(self.variables_names))
+
+            assert found.isdisjoint(dates), "Duplicates found"
+            found |= set(dates)
+
+            self._check_type_equal(dates, _dates)
+            idates = [i for i, d in enumerate(self.dates) if d in dates]
+            assert len(idates) == len(dates), (len(idates), len(dates))
+
+            for k in ["minimum", "maximum", "sums", "squares", "count", "has_nans"]:
+                agg[k][idates, ...] = stats[k]
+
+        for d in self.dates:
+            assert d in found or d in missing, f"Statistics for date {d} not precomputed."
+        assert len(self.dates) == len(found) + len(missing), "Not all dates found in precomputed statistics"
+        assert found.isdisjoint(missing), "Duplicate dates found in precomputed statistics"
+        assert agg["minimum"].shape[0] == len(self.dates), (agg["minimum"].shape, len(self.dates))
+
+        for k in ["minimum", "maximum", "sums", "squares", "count", "has_nans"]:
+            agg[k] = agg[k][mask, ...]
+        assert agg["minimum"].shape[0] == len(self.dates) - len(missing), (
+            agg["minimum"].shape,
+            len(self.dates),
+            len(missing),
+        )
+
+        minimum = np.nanmin(agg["minimum"], axis=0)
+        maximum = np.nanmax(agg["maximum"], axis=0)
+        sums = np.nansum(agg["sums"], axis=0)
+        squares = np.nansum(agg["squares"], axis=0)
+        count = np.nansum(agg["count"], axis=0)
+        has_nans = np.any(agg["has_nans"], axis=0)
+
+        assert sums.shape == count.shape
+        assert sums.shape == squares.shape
+        assert sums.shape == minimum.shape
+        assert sums.shape == maximum.shape
+        assert sums.shape == has_nans.shape
+
+        mean = sums / count
+        print(f"Aggregate {sums=} {count=} -> {mean=}")
+        assert sums.shape == mean.shape
+
+        x = squares / count - mean * mean
+        # remove negative variance due to numerical errors
+        # x[- 1e-15 < (x / (np.sqrt(squares / count) + np.abs(mean))) < 0] = 0
+        check_variance(x, self.variables_names, minimum, maximum, mean, count, sums, squares)
+
+        stdev = np.sqrt(x)
+        assert sums.shape == stdev.shape
+
+        self.summary = Summary(
+            minimum=minimum,
+            maximum=maximum,
+            mean=mean,
+            count=count,
+            sums=sums,
+            squares=squares,
+            stdev=stdev,
+            variables_names=self.variables_names,
+            has_nans=has_nans,
+        )
         LOG.info(f"Dataset {self.path} additions finalized.")
+        self.check_statistics()
+        self._write(self.summary)
+        self.tmp_storage.delete()
+
+    def _write(self, summary):
+        for k in ["mean", "stdev", "minimum", "maximum", "sums", "squares", "count", "has_nans"]:
+            self._add_dataset(name=k, array=summary[k])
+        self.registry.add_to_history("compute_statistics_end")
+        LOG.info(f"Wrote {self.name} additions in {self.path}")
+
+    def check_statistics(self):
+        ds = open_dataset(self.path)
+        ref = ds.statistics
+        for k in ["mean", "stdev", "minimum", "maximum"]:
+            print("✅❌", k, ds.statistics[k], self.summary[k])
+        for k in ds.statistics:
+            assert np.all(np.isclose(ref[k], self.summary[k], rtol=1e-4, atol=1e-4)), (
+                k,
+                ref[k],
+                self.summary[k],
+            )

@@ -121,7 +121,6 @@ class Creator:
         self.load()
         self.finalise()
         self.additions()
-        exit()
         self.cleanup()
 
     def additions(self):

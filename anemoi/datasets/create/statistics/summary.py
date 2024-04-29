@@ -22,7 +22,13 @@ class Summary(dict):
     And does some basic checks on the data.
     """
 
-    STATS_NAMES = ["minimum", "maximum", "mean", "stdev", "has_nans"]  # order matter for __str__.
+    STATS_NAMES = [
+        "minimum",
+        "maximum",
+        "mean",
+        "stdev",
+        "has_nans",
+    ]  # order matter for __str__.
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

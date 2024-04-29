@@ -150,6 +150,9 @@ def compare_datasets(a, b):
         assert a_ == b_, (a, b)
     assert a.missing == b.missing, "Missing are different"
 
+    aa = a  # [:,:,:,:]
+    bb = b  # [:,:,:,:]
+
     for i_date, date in zip(range(a.shape[0]), a.dates):
         if i_date in a.missing:
             continue
@@ -161,9 +164,9 @@ def compare_datasets(a, b):
                 a.variables[i_param],
                 b.variables[i_param],
             )
-            a_ = a[i_date, i_param]
-            b_ = b[i_date, i_param]
-            assert a.shape == b.shape, (date, param, a.shape, b.shape)
+            a_ = aa[i_date, i_param]
+            b_ = bb[i_date, i_param]
+            assert a_.shape == b_.shape, (date, param, a_.shape, b_.shape)
 
             a_nans = np.isnan(a_)
             b_nans = np.isnan(b_)
