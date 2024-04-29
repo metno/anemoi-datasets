@@ -59,12 +59,11 @@ class Creator:
             loader.load()
 
     def statistics(self, force=False, output=None, start=None, end=None):
-        from .loaders import StatisticsLoader
+        from .loaders import StatisticsAdder
 
-        loader = StatisticsLoader.from_dataset(
+        loader = StatisticsAdder.from_dataset(
             path=self.path,
             print=self.print,
-            force=force,
             statistics_tmp=self.statistics_tmp,
             statistics_output=output,
             recompute=False,
@@ -82,9 +81,11 @@ class Creator:
         handle.update_metadata(**metadata)
 
     def cleanup(self):
-        from .loaders import DatasetHandler
+        from .loaders import DatasetHandlerWithStatistics
 
-        cleaner = DatasetHandler.from_dataset(path=self.path, print=self.print, statistics_tmp=self.statistics_tmp)
+        cleaner = DatasetHandlerWithStatistics.from_dataset(
+            path=self.path, print=self.print, statistics_tmp=self.statistics_tmp
+        )
         cleaner.tmp_statistics.delete()
         cleaner.registry.clean()
 
@@ -92,6 +93,24 @@ class Creator:
         from .patch import apply_patch
 
         apply_patch(self.path, **kwargs)
+
+    def init_additions(self):
+        from .loaders import AdditionsLoader
+
+        a = AdditionsLoader.from_dataset(path=self.path, print=self.print)
+        a.initialise()
+
+    def run_additions(self, parts=None):
+        from .loaders import AdditionsLoader
+
+        a = AdditionsLoader.from_dataset(path=self.path, print=self.print)
+        a.run(parts)
+
+    def finalise_additions(self):
+        from .loaders import AdditionsLoader
+
+        a = AdditionsLoader.from_dataset(path=self.path, print=self.print)
+        a.finalise()
 
     def finalise(self, **kwargs):
         self.statistics(**kwargs)
@@ -101,7 +120,14 @@ class Creator:
         self.init()
         self.load()
         self.finalise()
+        self.additions()
+        exit()
         self.cleanup()
+
+    def additions(self):
+        self.init_additions()
+        self.run_additions()
+        self.finalise_additions()
 
     def _cache_context(self):
         from .utils import cache_context

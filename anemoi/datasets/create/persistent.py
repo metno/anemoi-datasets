@@ -34,7 +34,10 @@ class PersistentDict:
         self.dirname = directory
         self.name, self.ext = os.path.splitext(os.path.basename(self.dirname))
         if create:
-            os.makedirs(self.dirname, exist_ok=True)
+            self.create()
+
+    def create(self):
+        os.makedirs(self.dirname, exist_ok=True)
 
     def delete(self):
         try:

@@ -69,7 +69,7 @@ class Summary(dict):
         ]
         return "\n".join(out)
 
-    def save(self, filename, provenance=None):
+    def save(self, filename, **metadata):
         assert filename.endswith(".json"), filename
         dic = {}
         for k in self.STATS_NAMES:
@@ -80,7 +80,7 @@ class Summary(dict):
             for k in self.STATS_NAMES:
                 out["data"][name][k] = dic[k][i]
 
-        out["provenance"] = provenance
+        out["metadata"] = metadata
 
         with open(filename, "w") as f:
             json.dump(out, f, indent=2)

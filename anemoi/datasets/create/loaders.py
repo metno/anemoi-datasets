@@ -9,12 +9,14 @@ import logging
 import os
 import time
 import uuid
+import warnings
 from functools import cached_property
 
 import numpy as np
 import zarr
 
 from anemoi.datasets import open_dataset
+from anemoi.datasets.create.persistent import PersistentDict
 from anemoi.datasets.data.misc import as_first_date
 from anemoi.datasets.data.misc import as_last_date
 from anemoi.datasets.dates.groups import Groups
@@ -50,10 +52,6 @@ class GenericDatasetHandler:
         self.path = path
         self.kwargs = kwargs
         self.print = print
-
-        statistics_tmp = kwargs.get("statistics_tmp") or os.path.join(self.path + ".tmp_data", "statistics")
-
-        self.tmp_statistics = TmpStatistics(statistics_tmp)
 
     @classmethod
     def from_config(cls, *, config, path, print=print, **kwargs):
@@ -119,7 +117,14 @@ class DatasetHandler(GenericDatasetHandler):
     pass
 
 
-class Loader(GenericDatasetHandler):
+class DatasetHandlerWithStatistics(GenericDatasetHandler):
+    def __init__(self, statistics_tmp=None, **kwargs):
+        super().__init__(**kwargs)
+        statistics_tmp = kwargs.get("statistics_tmp") or os.path.join(self.path + ".tmp_data", "statistics")
+        self.tmp_statistics = TmpStatistics(statistics_tmp)
+
+
+class Loader(DatasetHandlerWithStatistics):
     def build_input(self):
         from climetlab.core.order import build_remapping
 
@@ -439,16 +444,12 @@ class ContentLoader(Loader):
         LOG.info(msg)
 
 
-class StatisticsLoader(Loader):
-    main_config = {}
-
+class StatisticsAdder(DatasetHandlerWithStatistics):
     def __init__(
         self,
-        config=None,
         statistics_output=None,
         statistics_start=None,
         statistics_end=None,
-        force=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -462,10 +463,15 @@ class StatisticsLoader(Loader):
             "-": self.write_stats_to_stdout,
         }.get(self.statistics_output, self.write_stats_to_file)
 
-        if config:
-            self.main_config = loader_config(config)
-
         self.read_dataset_metadata()
+
+    def allow_nan(self, name):
+        z = zarr.open(self.path, mode="r")
+        if "variables_with_nans" in z.attrs:
+            return name in z.attrs["variables_with_nans"]
+
+        warnings.warn(f"Cannot find 'variables_with_nans' in {self.path}. Assuming nans allowed for {name}.")
+        return True
 
     def _get_statistics_dates(self):
         dates = self.dates
@@ -510,7 +516,7 @@ class StatisticsLoader(Loader):
         self.output_writer(stats)
 
     def write_stats_to_file(self, stats):
-        stats.save(self.statistics_output, provenance=dict(config=self.main_config))
+        stats.save(self.statistics_output)
         LOG.info(f"✅ Statistics written in {self.statistics_output}")
 
     def write_stats_to_dataset(self, stats):
@@ -533,3 +539,47 @@ class StatisticsLoader(Loader):
 
     def write_stats_to_stdout(self, stats):
         LOG.info(stats)
+
+
+class AdditionsLoader(GenericDatasetHandler):
+    def __init__(self, name="additions", **kwargs):
+        super().__init__(**kwargs)
+        self.read_dataset_metadata()
+
+        self.name = name
+        storage_path = os.path.join(self.path + ".tmp_data", name)
+        self.tmp_storage = PersistentDict(directory=storage_path, create=True)
+
+    def initialise(self):
+        self.tmp_storage.delete()
+        self.tmp_storage.create()
+        print("✅", self.tmp_storage)
+        LOG.info(f"Dataset {self.path} additions initialized.")
+
+    @property
+    def total(self):
+        return len(self.dates)
+
+    @cached_property
+    def input_array(self):
+        return open_dataset(self.path)
+
+    def run(self, parts):
+        chunk_filter = ChunkFilter(parts=parts, total=self.total)
+        for i in range(self.total):
+            if not chunk_filter(i):
+                continue
+            date = self.dates[i]
+            self.print(f" -> Processing {date} ({i+1}/{self.total})")
+            arr = self.input_array[i]
+            mean = arr.mean()
+            print(f"Shape: {arr.shape} Mean: {mean}")
+            self.tmp_storage[date] = [i, mean]
+        LOG.info(f"Dataset {self.path} additions run.")
+
+    def finalise(self):
+        for k, v in self.tmp_storage.items():
+            print(k, v)
+        # TODO aggregated
+        # self.tmp_storage.delete()
+        LOG.info(f"Dataset {self.path} additions finalized.")
