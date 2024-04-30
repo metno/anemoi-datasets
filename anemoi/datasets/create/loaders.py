@@ -553,26 +553,14 @@ class StatisticsAdder(DatasetHandlerWithStatistics):
         LOG.info(stats)
 
 
-class AdditionsLoader(GenericDatasetHandler):
+class GenericAdditionsLoader(GenericDatasetHandler):
     def __init__(self, name="", **kwargs):
         super().__init__(**kwargs)
+        self.name = name
 
-        self.dataset_shape = self.ds.shape
-        self.variables_names = self.ds.variables
-        assert len(self.variables_names) == self.ds.shape[1], self.dataset_shape
+        assert len(self.ds.variables) == self.ds.shape[1], self.ds.shape
         self.dates = self.ds.dates
 
-        self.missing_dates = sorted(list([self.dates[i] for i in self.ds.missing]))
-
-        def check_missing_dates(missing_dates):
-            z = zarr.open(self.path, "r")
-            m = z.attrs.get("missing_dates", [])
-            m = sorted([np.datetime64(d) for d in m])
-            assert m == missing_dates, (m, missing_dates)
-
-        check_missing_dates(self.missing_dates)
-
-        self.name = name
         storage_path = os.path.join(self.path + ".tmp_data", name)
         self.tmp_storage = build_storage(directory=storage_path, create=True)
 
@@ -581,27 +569,9 @@ class AdditionsLoader(GenericDatasetHandler):
         self.tmp_storage.create()
         LOG.info(f"Dataset {self.path} additions initialized.")
 
-    @property
-    def total(self):
-        return len(self.ds.dates)
-
-    @cached_property
-    def input_array(self):
-        return self.ds
-
     @cached_property
     def ds(self):
         return open_dataset(self.path, start=self.start, end=self.end)
-
-    @cached_property
-    def start(self):
-        z = zarr.open(self.path, mode="r")
-        return z.attrs["statistics_start_date"]
-
-    @cached_property
-    def end(self):
-        z = zarr.open(self.path, mode="r")
-        return z.attrs["statistics_end_date"]
 
     @cached_property
     def _variables_with_nans(self):
@@ -615,29 +585,6 @@ class AdditionsLoader(GenericDatasetHandler):
             return name in self._variables_with_nans
         warnings.warn(f"❗Cannot find 'variables_with_nans' in {self.path}, Assuming nans allowed for {name}.")
         return True
-
-    def run(self, parts):
-        chunk_filter = ChunkFilter(parts=parts, total=self.total)
-        for i in range(0, self.total):
-            if not chunk_filter(i):
-                continue
-            date = self.dates[i]
-            # self.print(f"{self.name} additions : Processing {date} ({i+1}/{self.total})")
-            try:
-                arr = self.input_array[i : i + 1, ...]
-                stats = compute_statistics(arr, self.variables_names, allow_nan=self.allow_nan)
-                dates_ok = [date]
-                missing_dates = []
-            except MissingDateError:
-                stats = None
-                dates_ok = []
-                missing_dates = [date]
-
-            dates = sorted(dates_ok + missing_dates)
-            self.tmp_storage.add([dates_ok, missing_dates, i, stats], key=dates)
-        self.tmp_storage.flush()
-
-        LOG.info(f"Dataset {self.path} additions run.")
 
     @classmethod
     def _check_type_equal(cls, a, b):
@@ -658,8 +605,8 @@ class AdditionsLoader(GenericDatasetHandler):
         )
 
     def finalise(self):
-        self.shape = (len(self.dates), len(self.variables_names))
-        LOG.info(f"Aggregating {self.name} statistics on shape={self.shape}. Variables : {self.variables_names}")
+        self.shape = (len(self.dates), len(self.ds.variables))
+        LOG.info(f"Aggregating {self.name} statistics on shape={self.shape}. Variables : {self.ds.variables}")
 
         agg = self._get_empty_stats_dict(self.shape)
 
@@ -677,7 +624,7 @@ class AdditionsLoader(GenericDatasetHandler):
             shape = stats["minimum"].shape
             assert shape[0] == len(dates), (shape, len(dates))
             assert shape[0] == len(_dates), (shape, len(_dates))
-            assert shape[1] == len(self.variables_names), (shape, len(self.variables_names))
+            assert shape[1] == len(self.ds.variables), (shape, len(self.ds.variables))
 
             assert found.isdisjoint(dates), "Duplicates found"
             found |= set(dates)
@@ -722,7 +669,7 @@ class AdditionsLoader(GenericDatasetHandler):
         x = squares / count - mean * mean
         # remove negative variance due to numerical errors
         # x[- 1e-15 < (x / (np.sqrt(squares / count) + np.abs(mean))) < 0] = 0
-        check_variance(x, self.variables_names, minimum, maximum, mean, count, sums, squares)
+        check_variance(x, self.ds.variables, minimum, maximum, mean, count, sums, squares)
 
         stdev = np.sqrt(x)
         assert sums.shape == stdev.shape
@@ -735,7 +682,7 @@ class AdditionsLoader(GenericDatasetHandler):
             sums=sums,
             squares=squares,
             stdev=stdev,
-            variables_names=self.variables_names,
+            variables_names=self.ds.variables,
             has_nans=has_nans,
         )
         LOG.info(f"Dataset {self.path} additions finalized.")
@@ -758,3 +705,47 @@ class AdditionsLoader(GenericDatasetHandler):
                 ref[k],
                 self.summary[k],
             )
+
+
+class AdditionsLoader(GenericAdditionsLoader):
+
+    @property
+    def total(self):
+        return len(self.ds.dates)
+
+    @cached_property
+    def input_array(self):
+        return self.ds
+
+    @cached_property
+    def start(self):
+        z = zarr.open(self.path, mode="r")
+        return z.attrs["statistics_start_date"]
+
+    @cached_property
+    def end(self):
+        z = zarr.open(self.path, mode="r")
+        return z.attrs["statistics_end_date"]
+
+    def run(self, parts):
+        chunk_filter = ChunkFilter(parts=parts, total=self.total)
+        for i in range(0, self.total):
+            if not chunk_filter(i):
+                continue
+            date = self.dates[i]
+            # self.print(f"{self.name} additions : Processing {date} ({i+1}/{self.total})")
+            try:
+                arr = self.input_array[i : i + 1, ...]
+                stats = compute_statistics(arr, self.ds.variables, allow_nan=self.allow_nan)
+                dates_ok = [date]
+                missing_dates = []
+            except MissingDateError:
+                stats = None
+                dates_ok = []
+                missing_dates = [date]
+
+            dates = sorted(dates_ok + missing_dates)
+            self.tmp_storage.add([dates_ok, missing_dates, i, stats], key=dates)
+        self.tmp_storage.flush()
+
+        LOG.info(f"Dataset {self.path} additions run.")
