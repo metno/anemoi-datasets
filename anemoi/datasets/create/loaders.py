@@ -594,61 +594,43 @@ class GenericAdditionsLoader(GenericDatasetHandler):
         b = b[0] if b else None
         assert type(a) is type(b), (type(a), type(b))
 
-    def _get_empty_stats_dict(self, shape):
-        return dict(
-            minimum=np.full(self.shape, np.nan, dtype=np.float64),
-            maximum=np.full(self.shape, np.nan, dtype=np.float64),
-            sums=np.full(self.shape, np.nan, dtype=np.float64),
-            squares=np.full(self.shape, np.nan, dtype=np.float64),
-            count=np.full(self.shape, -1, dtype=np.int64),
-            has_nans=np.full(self.shape, False, dtype=np.bool_),
-        )
-
     def finalise(self):
-        self.shape = (len(self.dates), len(self.ds.variables))
-        LOG.info(f"Aggregating {self.name} statistics on shape={self.shape}. Variables : {self.ds.variables}")
-
-        agg = self._get_empty_stats_dict(self.shape)
+        shape = (len(self.dates), len(self.ds.variables))
+        agg = dict(
+            minimum=np.full(shape, np.nan, dtype=np.float64),
+            maximum=np.full(shape, np.nan, dtype=np.float64),
+            sums=np.full(shape, np.nan, dtype=np.float64),
+            squares=np.full(shape, np.nan, dtype=np.float64),
+            count=np.full(shape, -1, dtype=np.int64),
+            has_nans=np.full(shape, False, dtype=np.bool_),
+        )
+        LOG.info(f"Aggregating {self.name} statistics on shape={shape}. Variables : {self.ds.variables}")
 
         found = set()
+        ifound = set()
         missing = set()
-        mask = []
-        for _dates, (dates, missing_dates, _, stats) in self.tmp_storage.items():
-            if missing_dates:
-                mask.append(False)
-                missing |= set(missing_dates)
+        for _date, (date, i, stats) in self.tmp_storage.items():
+            assert _date == date
+            if stats == "missing":
+                missing.add(date)
                 continue
-            mask.append(True)
 
-            assert isinstance(stats, dict), stats
-            shape = stats["minimum"].shape
-            assert shape[0] == len(dates), (shape, len(dates))
-            assert shape[0] == len(_dates), (shape, len(_dates))
-            assert shape[1] == len(self.ds.variables), (shape, len(self.ds.variables))
-
-            assert found.isdisjoint(dates), "Duplicates found"
-            found |= set(dates)
-
-            self._check_type_equal(dates, _dates)
-            idates = [i for i, d in enumerate(self.dates) if d in dates]
-            assert len(idates) == len(dates), (len(idates), len(dates))
+            assert date not in found, f"Duplicates found {date}"
+            found.add(date)
+            ifound.add(i)
 
             for k in ["minimum", "maximum", "sums", "squares", "count", "has_nans"]:
-                agg[k][idates, ...] = stats[k]
+                agg[k][i, ...] = stats[k]
 
-        for d in self.dates:
-            assert d in found or d in missing, f"Statistics for date {d} not precomputed."
-        assert len(self.dates) == len(found) + len(missing), "Not all dates found in precomputed statistics"
-        assert found.isdisjoint(missing), "Duplicate dates found in precomputed statistics"
-        assert agg["minimum"].shape[0] == len(self.dates), (agg["minimum"].shape, len(self.dates))
+        assert len(found) + len(missing) == len(self.dates), (len(found), len(missing), len(self.dates))
+        assert found.union(missing) == set(self.dates), (found, missing, set(self.dates))
 
+        mask = sorted(list(ifound))
         for k in ["minimum", "maximum", "sums", "squares", "count", "has_nans"]:
             agg[k] = agg[k][mask, ...]
-        assert agg["minimum"].shape[0] == len(self.dates) - len(missing), (
-            agg["minimum"].shape,
-            len(self.dates),
-            len(missing),
-        )
+
+        for k in ["minimum", "maximum", "sums", "squares", "count", "has_nans"]:
+            assert agg[k].shape == agg["count"].shape, (agg[k].shape, agg["count"].shape)
 
         minimum = np.nanmin(agg["minimum"], axis=0)
         maximum = np.nanmax(agg["maximum"], axis=0)
@@ -727,6 +709,9 @@ class AdditionsLoader(GenericAdditionsLoader):
         z = zarr.open(self.path, mode="r")
         return z.attrs["statistics_end_date"]
 
+    def expect_missing_date(self, idate, date):
+        return idate in self.ds.missing
+
     def run(self, parts):
         chunk_filter = ChunkFilter(parts=parts, total=self.total)
         for i in range(0, self.total):
@@ -737,15 +722,10 @@ class AdditionsLoader(GenericAdditionsLoader):
             try:
                 arr = self.input_array[i : i + 1, ...]
                 stats = compute_statistics(arr, self.ds.variables, allow_nan=self.allow_nan)
-                dates_ok = [date]
-                missing_dates = []
+                self.tmp_storage.add([date, i, stats], key=date)
             except MissingDateError:
-                stats = None
-                dates_ok = []
-                missing_dates = [date]
-
-            dates = sorted(dates_ok + missing_dates)
-            self.tmp_storage.add([dates_ok, missing_dates, i, stats], key=dates)
+                assert self.expect_missing_date(i, date), (i, date)
+                self.tmp_storage.add([date, i, "missing"], key=date)
         self.tmp_storage.flush()
 
         LOG.info(f"Dataset {self.path} additions run.")
