@@ -95,22 +95,40 @@ class Creator:
         apply_patch(self.path, **kwargs)
 
     def init_additions(self):
-        from .loaders import AdditionsLoader
+        from .loaders import StatisticsAddition
 
-        a = AdditionsLoader.from_dataset(path=self.path, print=self.print)
+        a = StatisticsAddition.from_dataset(path=self.path, print=self.print)
         a.initialise()
 
-    def run_additions(self, parts=None):
-        from .loaders import AdditionsLoader
+    def run_additions(self, parts=None, delta=[1, 3, 6, 12]):
+        from .loaders import StatisticsAddition
+        from .loaders import TendenciesStatisticsAddition
+        from .loaders import TendenciesStatisticsDeltaNotMultipleOfFrequency
 
-        a = AdditionsLoader.from_dataset(path=self.path, print=self.print)
+        a = StatisticsAddition.from_dataset(path=self.path, print=self.print)
         a.run(parts)
 
-    def finalise_additions(self):
-        from .loaders import AdditionsLoader
+        for d in delta:
+            try:
+                a = TendenciesStatisticsAddition.from_dataset(path=self.path, print=self.print, delta=d)
+                a.run(parts)
+            except TendenciesStatisticsDeltaNotMultipleOfFrequency:
+                self.print(f"Skipping delta={d} as it is not a multiple of the frequency.")
 
-        a = AdditionsLoader.from_dataset(path=self.path, print=self.print)
+    def finalise_additions(self, delta=[1, 3, 6, 12]):
+        from .loaders import StatisticsAddition
+        from .loaders import TendenciesStatisticsAddition
+        from .loaders import TendenciesStatisticsDeltaNotMultipleOfFrequency
+
+        a = StatisticsAddition.from_dataset(path=self.path, print=self.print)
         a.finalise()
+
+        for d in delta:
+            try:
+                a = TendenciesStatisticsAddition.from_dataset(path=self.path, print=self.print, delta=d)
+                a.finalise()
+            except TendenciesStatisticsDeltaNotMultipleOfFrequency:
+                self.print(f"Skipping delta={d} as it is not a multiple of the frequency.")
 
     def finalise(self, **kwargs):
         self.statistics(**kwargs)

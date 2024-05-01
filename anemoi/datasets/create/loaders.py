@@ -544,23 +544,13 @@ class StatisticsAdder(DatasetHandlerWithStatistics):
         LOG.info(stats)
 
 
-class GenericAdditionsLoader(GenericDatasetHandler):
+class GenericAdditions(GenericDatasetHandler):
     def __init__(self, name="", **kwargs):
         super().__init__(**kwargs)
         self.name = name
 
         storage_path = os.path.join(self.path + ".tmp_data", name)
         self.tmp_storage = build_storage(directory=storage_path, create=True)
-
-        z = zarr.open(self.path, mode="r")
-        start = z.attrs["statistics_start_date"]
-        end = z.attrs["statistics_end_date"]
-        self.ds = open_dataset(self.path, start=start, end=end)
-
-        self.variables = self.ds.variables
-        self.dates = self.ds.dates
-
-        assert len(self.variables) == self.ds.shape[1], self.ds.shape
 
     def initialise(self):
         self.tmp_storage.delete()
@@ -673,6 +663,40 @@ class GenericAdditionsLoader(GenericDatasetHandler):
         LOG.info(f"Wrote {self.name} additions in {self.path}")
 
     def check_statistics(self):
+        pass
+
+
+class StatisticsAddition(GenericAdditions):
+    def __init__(self, **kwargs):
+        super().__init__("statistics_", **kwargs)
+
+        z = zarr.open(self.path, mode="r")
+        start = z.attrs["statistics_start_date"]
+        end = z.attrs["statistics_end_date"]
+        self.ds = open_dataset(self.path, start=start, end=end)
+
+        self.variables = self.ds.variables
+        self.dates = self.ds.dates
+
+        assert len(self.variables) == self.ds.shape[1], self.ds.shape
+        self.total = len(self.dates)
+
+    def run(self, parts):
+        chunk_filter = ChunkFilter(parts=parts, total=self.total)
+        for i in range(0, self.total):
+            if not chunk_filter(i):
+                continue
+            date = self.dates[i]
+            try:
+                arr = self.ds[i : i + 1, ...]
+                stats = compute_statistics(arr, self.variables, allow_nan=self.allow_nan)
+                self.tmp_storage.add([date, i, stats], key=date)
+            except MissingDateError:
+                self.tmp_storage.add([date, i, "missing"], key=date)
+        self.tmp_storage.flush()
+        LOG.info(f"Dataset {self.path} additions run.")
+
+    def check_statistics(self):
         ds = open_dataset(self.path)
         ref = ds.statistics
         for k in ds.statistics:
@@ -683,13 +707,49 @@ class GenericAdditionsLoader(GenericDatasetHandler):
             )
 
 
-class AdditionsLoader(GenericAdditionsLoader):
-    @property
-    def total(self):
-        return len(self.ds.dates)
+class DeltaDataset:
+    def __init__(self, ds, idelta):
+        self.ds = ds
+        self.idelta = idelta
 
-    def expect_missing_date(self, idate, date):
-        return idate in self.ds.missing
+    def __getitem__(self, i):
+        j = i - self.idelta
+        if j < 0:
+            raise MissingDateError(f"Missing date {j}")
+        return self.ds[i : i + 1, ...] - self.ds[j : j + 1, ...]
+
+
+class TendenciesStatisticsDeltaNotMultipleOfFrequency(ValueError):
+    pass
+
+
+class TendenciesStatisticsAddition(GenericAdditions):
+    def __init__(self, path, delta=None, **kwargs):
+        full_ds = open_dataset(path)
+        self.variables = full_ds.variables
+
+        frequency = full_ds.frequency
+        if delta is None:
+            delta = frequency
+        assert isinstance(delta, int), delta
+        if not delta % frequency == 0:
+            raise TendenciesStatisticsDeltaNotMultipleOfFrequency(
+                f"Delta {delta} is not a multiple of frequency {frequency}"
+            )
+        idelta = delta // frequency
+
+        super().__init__(path=path, name=f"tendencies_statistics_{delta}h", **kwargs)
+
+        z = zarr.open(self.path, mode="r")
+        start = z.attrs["statistics_start_date"]
+        end = z.attrs["statistics_end_date"]
+        start = datetime.datetime.fromisoformat(start)
+        ds = open_dataset(self.path, start=start + datetime.timedelta(hours=delta), end=end)
+        self.dates = ds.dates
+        self.total = len(self.dates)
+
+        ds = open_dataset(self.path, start=start, end=end)
+        self.ds = DeltaDataset(ds, idelta)
 
     def run(self, parts):
         chunk_filter = ChunkFilter(parts=parts, total=self.total)
@@ -697,13 +757,17 @@ class AdditionsLoader(GenericAdditionsLoader):
             if not chunk_filter(i):
                 continue
             date = self.dates[i]
-            # self.print(f"{self.name} additions : Processing {date} ({i+1}/{self.total})")
             try:
-                arr = self.ds[i : i + 1, ...]
+                arr = self.ds[i]
                 stats = compute_statistics(arr, self.variables, allow_nan=self.allow_nan)
                 self.tmp_storage.add([date, i, stats], key=date)
             except MissingDateError:
-                assert self.expect_missing_date(i, date), (i, date)
                 self.tmp_storage.add([date, i, "missing"], key=date)
         self.tmp_storage.flush()
         LOG.info(f"Dataset {self.path} additions run.")
+
+    def _write(self, summary):
+        for k in ["mean", "stdev", "minimum", "maximum", "sums", "squares", "count", "has_nans"]:
+            self._add_dataset(name=f"{self.name}_{k}", array=summary[k])
+        self.registry.add_to_history(f"compute_{self.name}_end")
+        LOG.info(f"Wrote {self.name} additions in {self.path}")
