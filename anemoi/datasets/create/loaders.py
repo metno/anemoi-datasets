@@ -534,16 +534,7 @@ class StatisticsAdder(DatasetHandlerWithStatistics):
         if not all(self.registry.get_flags(sync=False)):
             raise Exception(f"❗Zarr {self.path} is not fully built, not writting statistics into dataset.")
 
-        for k in [
-            "mean",
-            "stdev",
-            "minimum",
-            "maximum",
-            "sums",
-            "squares",
-            "count",
-            "has_nans",
-        ]:
+        for k in ["mean", "stdev", "minimum", "maximum", "sums", "squares", "count", "has_nans"]:
             self._add_dataset(name=k, array=stats[k])
 
         self.registry.add_to_history("compute_statistics_end")
@@ -558,20 +549,23 @@ class GenericAdditionsLoader(GenericDatasetHandler):
         super().__init__(**kwargs)
         self.name = name
 
-        assert len(self.ds.variables) == self.ds.shape[1], self.ds.shape
-        self.dates = self.ds.dates
-
         storage_path = os.path.join(self.path + ".tmp_data", name)
         self.tmp_storage = build_storage(directory=storage_path, create=True)
+
+        z = zarr.open(self.path, mode="r")
+        start = z.attrs["statistics_start_date"]
+        end = z.attrs["statistics_end_date"]
+        self.ds = open_dataset(self.path, start=start, end=end)
+
+        self.variables = self.ds.variables
+        self.dates = self.ds.dates
+
+        assert len(self.variables) == self.ds.shape[1], self.ds.shape
 
     def initialise(self):
         self.tmp_storage.delete()
         self.tmp_storage.create()
         LOG.info(f"Dataset {self.path} additions initialized.")
-
-    @cached_property
-    def ds(self):
-        return open_dataset(self.path, start=self.start, end=self.end)
 
     @cached_property
     def _variables_with_nans(self):
@@ -595,7 +589,7 @@ class GenericAdditionsLoader(GenericDatasetHandler):
         assert type(a) is type(b), (type(a), type(b))
 
     def finalise(self):
-        shape = (len(self.dates), len(self.ds.variables))
+        shape = (len(self.dates), len(self.variables))
         agg = dict(
             minimum=np.full(shape, np.nan, dtype=np.float64),
             maximum=np.full(shape, np.nan, dtype=np.float64),
@@ -604,7 +598,7 @@ class GenericAdditionsLoader(GenericDatasetHandler):
             count=np.full(shape, -1, dtype=np.int64),
             has_nans=np.full(shape, False, dtype=np.bool_),
         )
-        LOG.info(f"Aggregating {self.name} statistics on shape={shape}. Variables : {self.ds.variables}")
+        LOG.info(f"Aggregating {self.name} statistics on shape={shape}. Variables : {self.variables}")
 
         found = set()
         ifound = set()
@@ -651,7 +645,7 @@ class GenericAdditionsLoader(GenericDatasetHandler):
         x = squares / count - mean * mean
         # remove negative variance due to numerical errors
         # x[- 1e-15 < (x / (np.sqrt(squares / count) + np.abs(mean))) < 0] = 0
-        check_variance(x, self.ds.variables, minimum, maximum, mean, count, sums, squares)
+        check_variance(x, self.variables, minimum, maximum, mean, count, sums, squares)
 
         stdev = np.sqrt(x)
         assert sums.shape == stdev.shape
@@ -664,7 +658,7 @@ class GenericAdditionsLoader(GenericDatasetHandler):
             sums=sums,
             squares=squares,
             stdev=stdev,
-            variables_names=self.ds.variables,
+            variables_names=self.variables,
             has_nans=has_nans,
         )
         LOG.info(f"Dataset {self.path} additions finalized.")
@@ -690,24 +684,9 @@ class GenericAdditionsLoader(GenericDatasetHandler):
 
 
 class AdditionsLoader(GenericAdditionsLoader):
-
     @property
     def total(self):
         return len(self.ds.dates)
-
-    @cached_property
-    def input_array(self):
-        return self.ds
-
-    @cached_property
-    def start(self):
-        z = zarr.open(self.path, mode="r")
-        return z.attrs["statistics_start_date"]
-
-    @cached_property
-    def end(self):
-        z = zarr.open(self.path, mode="r")
-        return z.attrs["statistics_end_date"]
 
     def expect_missing_date(self, idate, date):
         return idate in self.ds.missing
@@ -720,12 +699,11 @@ class AdditionsLoader(GenericAdditionsLoader):
             date = self.dates[i]
             # self.print(f"{self.name} additions : Processing {date} ({i+1}/{self.total})")
             try:
-                arr = self.input_array[i : i + 1, ...]
-                stats = compute_statistics(arr, self.ds.variables, allow_nan=self.allow_nan)
+                arr = self.ds[i : i + 1, ...]
+                stats = compute_statistics(arr, self.variables, allow_nan=self.allow_nan)
                 self.tmp_storage.add([date, i, stats], key=date)
             except MissingDateError:
                 assert self.expect_missing_date(i, date), (i, date)
                 self.tmp_storage.add([date, i, "missing"], key=date)
         self.tmp_storage.flush()
-
         LOG.info(f"Dataset {self.path} additions run.")
