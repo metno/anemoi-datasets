@@ -363,6 +363,20 @@ def _open_dataset(*args, **kwargs):
                 datasets = [datasets]
             for a in datasets:
                 sets.append(_open(a))
+                
+                try:
+                    if (
+                        len(datasets) == 1 and kwargs.get("sort_vars")== True
+                        ):
+
+                        kwargs.pop("sort_vars")
+                        adjust = {"select" : sorted(sets[0].variables)}
+                        kwargs.update(adjust)
+                        return sets[0]._subset(**kwargs)
+                    else:
+                        kwargs.pop("sort_vars")
+                except:
+                    pass
 
     assert len(sets) > 0, (args, kwargs)
 
