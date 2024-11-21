@@ -254,3 +254,35 @@ class Cropping(Masked):
             The metadata specific to the Cropping subclass.
         """
         return dict(area=self.area)
+
+
+class TrimEdge(Masked):
+
+    def __init__(self, forward, edge):
+        self.edge = edge
+
+        shape = forward.field_shape
+        if len(shape) != 2:
+            raise ValueError("TrimEdge only works on regular grids")
+
+        mask = np.full(shape, True, dtype=bool)
+        if edge > 0:
+            mask[0:edge, :] = False
+            mask[-edge:, :] = False
+            mask[:, 0:edge] = False
+            mask[:, -edge:] = False
+
+        mask = mask.flatten()
+
+        super().__init__(forward, mask)
+
+    def mutate(self) -> Dataset:
+        if self.edge is None:
+            return self.forward.mutate()
+        return super().mutate()
+
+    def tree(self):
+        return Node(self, [self.forward.tree()], edge=self.edge)
+
+    def subclass_metadata_specific(self):
+        return dict(edge=self.edge)

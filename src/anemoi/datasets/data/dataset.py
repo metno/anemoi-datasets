@@ -244,6 +244,12 @@ class Dataset(ABC, Sized):
             method = kwargs.pop("method", "every-nth")
             return Thinning(self, thinning, method)._subset(**kwargs).mutate()
 
+        if "trim_edge" in kwargs:
+            from .masked import TrimEdge
+
+            edge = kwargs.pop("trim_edge")
+            return TrimEdge(self, edge)._subset(**kwargs).mutate()
+
         if "area" in kwargs:
             from .masked import Cropping
 
