@@ -78,14 +78,28 @@ def create_zarr(
     dates = np.array(dates, dtype="datetime64")
 
     ensembles = ensemble if ensemble is not None else 1
-    values = grids if grids is not None else VALUES
+    if grids is None:
+        grids = [VALUES]
 
-    data = np.zeros(shape=(len(dates), len(vars), ensembles, values))
+    num_points = int(np.prod(grids))
+    if len(grids) == 1:
+        lats = np.array([x + grids[0] for x in range(num_points)])
+        lons = np.array([x + grids[0] for x in range(num_points)])
+    else:
+        lats = np.array([x + grids[0] for x in range(grids[0])])
+        lons = np.array([x + grids[1] for x in range(grids[1])])
+        lats, lons = np.meshgrid(lats, lons)
+        lats = lats.flatten()
+        lons = lons.flatten()
+        root.attrs["field_shape"] = grids
+
+    data = np.zeros(shape=(len(dates), len(vars), ensembles, num_points))
 
     for i, date in enumerate(dates):
         for j, var in enumerate(vars):
             for e in range(ensembles):
-                data[i, j, e] = _(date.astype(object), var, k, e, values)
+                data[i, j, e] = _(date.astype(object), var, k, e, num_points)
+
 
     root.create_dataset(
         "data",
@@ -101,12 +115,12 @@ def create_zarr(
     )
     root.create_dataset(
         "latitudes",
-        data=np.array([x + values for x in range(values)]),
+        data=lats,
         compressor=None,
     )
     root.create_dataset(
         "longitudes",
-        data=np.array([x + values for x in range(values)]),
+        data=lons,
         compressor=None,
     )
 
@@ -173,6 +187,10 @@ def zarr_from_str(name, mode):
 
     print(args)
 
+    grids = args["grids"]
+    if grids is not None:
+        grids = [int(x) for x in grids.split(',')]
+
     return create_zarr(
         start=int(args["start"]),
         end=int(args["end"]),
@@ -181,7 +199,7 @@ def zarr_from_str(name, mode):
         vars=[x for x in args["vars"]],
         k=int(args["k"]),
         ensemble=int(args["ensemble"]) if args["ensemble"] is not None else None,
-        grids=int(args["grids"]) if args["grids"] is not None else None,
+        grids=grids,
         missing=args["test"] == "missing",
     )
 
@@ -1129,6 +1147,33 @@ def test_cropping():
         area=(18, 11, 11, 18),
     )
     assert test.ds.shape == (365 * 4, 4, 1, 8)
+
+
+@mockup_open_zarr
+def test_trim_edge():
+    test = DatasetTester(
+        "test-2021-2021-6h-o96-abcd-1-1-10,5",
+        trim_edge=1,
+    )
+    assert test.ds.shape == (365 * 4, 4, 1, 8*3)
+
+
+@mockup_open_zarr
+def test_trim_edge2():
+    test = DatasetTester(
+        "test-2021-2021-6h-o96-abcd-1-1-10,5",
+        trim_edge=0,
+    )
+    assert test.ds.shape == (365 * 4, 4, 1, 10*5)
+
+
+@mockup_open_zarr
+def test_trim_edge3():
+    test = DatasetTester(
+        "test-2021-2021-6h-o96-abcd-1-1-10,5",
+        trim_edge=100,
+    )
+    assert test.ds.shape == (365 * 4, 4, 1, 0)
 
 
 if __name__ == "__main__":
