@@ -271,7 +271,8 @@ class Dataset(ABC, Sized):
             opts = kwargs.pop("mask_from_dataset")
             dataset = opts.pop("dataset")
             field = opts.pop("field")
-            return MaskFromDataset(self, dataset, field)._subset(**kwargs).mutate()
+            threshold = opts.pop("threshold", 0)
+            return MaskFromDataset(self, dataset, field, threshold)._subset(**kwargs).mutate()
 
         if "set_missing_dates" in kwargs:
             from .missing import MissingDates
