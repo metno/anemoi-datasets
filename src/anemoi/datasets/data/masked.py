@@ -118,25 +118,28 @@ class Thinning(Masked):
 
 class MaskFromDataset(Masked):
 
-    def __init__(self, forward, dataset, field_name):
+    def __init__(self, forward, dataset, field_name, threshold=0):
         from ..data import open_dataset
 
-        if not isinstance(dataset, Dataset):
-            raise ValueError("'dataset' is not a dataset")
+        self.dataset = open_dataset(dataset)
+        if field_name not in self.dataset.dataset_metadata()["variables"]:
+            raise ValueError(f"'{field_name}' is not a variable in the mask dataset")
 
-        self.dataset = dataset
         self.field_name = field_name
+        self.threshold = threshold
 
-        index = dataset.dataset_metadata()["variables"].index(field_name)
-        mask = dataset.data[0, index, 0, :].astype(bool)
+        index = self.dataset.dataset_metadata()["variables"].index(field_name)
+        mask = (self.dataset.data[0, index, 0, :] > threshold).astype(bool)
 
         super().__init__(forward, mask)
 
     def tree(self):
-        return Node(self, [self.forward.tree()], dataset=self.dataset, field_name=self.field_name)
+        return Node(
+            self, [self.forward.tree()], dataset=self.dataset, field_name=self.field_name, threshold=self.threshold
+        )
 
     def subclass_metadata_specific(self):
-        return dict(dataset=self.dataset)
+        return dict(dataset=self.dataset, field_name=self.field_name, threshold=self.threshold)
 
 
 class Cropping(Masked):
