@@ -23,6 +23,7 @@ from anemoi.datasets.data.concat import Concat
 from anemoi.datasets.data.ensemble import Ensemble
 from anemoi.datasets.data.grids import GridsBase
 from anemoi.datasets.data.join import Join
+from anemoi.datasets.data.masked import TrimEdge
 from anemoi.datasets.data.misc import as_first_date
 from anemoi.datasets.data.misc import as_last_date
 from anemoi.datasets.data.select import Rename
@@ -65,6 +66,7 @@ def create_zarr(
     ensemble=None,
     grids=None,
     missing=False,
+    data=None,
 ):
     root = zarr.group()
     assert isinstance(frequency, datetime.timedelta)
@@ -93,13 +95,15 @@ def create_zarr(
         lons = lons.flatten()
         root.attrs["field_shape"] = grids
 
-    data = np.zeros(shape=(len(dates), len(vars), ensembles, num_points))
+    if data is None:
+        data = np.zeros(shape=(len(dates), len(vars), ensembles, num_points))
 
-    for i, date in enumerate(dates):
-        for j, var in enumerate(vars):
-            for e in range(ensembles):
-                data[i, j, e] = _(date.astype(object), var, k, e, num_points)
+        for i, date in enumerate(dates):
+            for j, var in enumerate(vars):
+                for e in range(ensembles):
+                    data[i, j, e] = _(date.astype(object), var, k, e, num_points)
 
+    assert data.shape == (len(dates), len(vars), ensembles, num_points)
 
     root.create_dataset(
         "data",
@@ -189,7 +193,7 @@ def zarr_from_str(name, mode):
 
     grids = args["grids"]
     if grids is not None:
-        grids = [int(x) for x in grids.split(',')]
+        grids = [int(x) for x in grids.split(",")]
 
     return create_zarr(
         start=int(args["start"]),
@@ -297,6 +301,7 @@ class DatasetTester:
         for row in self.ds:
             # print(f"{date=} {row.shape}")
             expect = date_to_row(date)
+            print(date, expect, expect.shape)
             assert (row == expect).all()
             dates.append(date)
             date += time_increment
@@ -1155,7 +1160,20 @@ def test_trim_edge():
         "test-2021-2021-6h-o96-abcd-1-1-10,5",
         trim_edge=1,
     )
-    assert test.ds.shape == (365 * 4, 4, 1, 8*3)
+    test.run(
+        expected_class=TrimEdge,
+        expected_length=365 * 4,
+        date_to_row=lambda date: simple_row(date, "abcd"),
+        start_date=datetime.datetime(2021, 1, 1),
+        time_increment=datetime.timedelta(hours=6),
+        expected_shape=(365 * 4, 4, 1, 8 * 3),
+        expected_variables="abcd",
+        expected_name_to_index="abcd",
+        statistics_reference_dataset="test-2000-2010-6h-o96-abcd",
+        statistics_reference_variables="abcd",
+    )
+
+    assert test.ds.shape == (365 * 4, 4, 1, 8 * 3)
 
 
 @mockup_open_zarr
@@ -1164,7 +1182,7 @@ def test_trim_edge2():
         "test-2021-2021-6h-o96-abcd-1-1-10,5",
         trim_edge=0,
     )
-    assert test.ds.shape == (365 * 4, 4, 1, 10*5)
+    assert test.ds.shape == (365 * 4, 4, 1, 10 * 5)
 
 
 @mockup_open_zarr
@@ -1176,8 +1194,22 @@ def test_trim_edge3():
     assert test.ds.shape == (365 * 4, 4, 1, 0)
 
 
+@mockup_open_zarr
+def test_mask_from_dataset():
+    # The mask will remove the first 5 points in the dataset, which means only 7 are left
+    mask = "test-1-1-6h-o96-m-0-1-3,4"
+    threshold = 1010113.045
+    # This dataset has the values 1010113.00 1010113.01 ... 1010113.11
+
+    test = DatasetTester(
+        "test-2021-2021-6h-o96-abcd-0-1-3,4",
+        mask_from_dataset={"dataset": mask, "field": "m", "threshold": threshold},
+    )
+    assert test.ds.shape == (365 * 4, 4, 1, 7)
+
+
 if __name__ == "__main__":
     for name, obj in list(globals().items()):
-        if name.startswith("test_") and callable(obj):
+        if name.startswith("test_trim") and callable(obj):
             print(f"Running {name}...")
             obj()
