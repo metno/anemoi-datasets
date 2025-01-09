@@ -206,6 +206,29 @@ class Thinning(Masked):
         return dict(thinning=self.thinning, method=self.method)
 
 
+class MaskFromDataset(Masked):
+
+    def __init__(self, forward, dataset, field_name):
+        from ..data import open_dataset
+
+        if not isinstance(dataset, Dataset):
+            raise ValueError("'dataset' is not a dataset")
+
+        self.dataset = dataset
+        self.field_name = field_name
+
+        index = dataset.dataset_metadata()["variables"].index(field_name)
+        mask = dataset.data[0, index, 0, :].astype(bool)
+
+        super().__init__(forward, mask)
+
+    def tree(self):
+        return Node(self, [self.forward.tree()], dataset=self.dataset, field_name=self.field_name)
+
+    def subclass_metadata_specific(self):
+        return dict(dataset=self.dataset)
+
+
 class Cropping(Masked):
     """A class to represent a cropped dataset."""
 
