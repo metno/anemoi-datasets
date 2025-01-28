@@ -233,7 +233,11 @@ class MaskFromDataset(Masked):
 
     @property
     def field_shape(self):
-        return (np.product(self.field_shape), )
+        return (np.sum(self.mask),)
+
+    @property
+    def grids(self):
+        return (np.sum(self.mask),)
 
 
 class Cropping(Masked):
