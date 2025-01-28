@@ -231,6 +231,10 @@ class MaskFromDataset(Masked):
     def subclass_metadata_specific(self):
         return dict(dataset=self.dataset, field_name=self.field_name, threshold=self.threshold)
 
+    @property
+    def field_shape(self):
+        return (np.product(self.field_shape), )
+
 
 class Cropping(Masked):
     """A class to represent a cropped dataset."""
@@ -312,3 +316,8 @@ class TrimEdge(Masked):
 
     def subclass_metadata_specific(self):
         return dict(edge=self.edge)
+
+    @property
+    def field_shape(self):
+        x, y = self.forward.field_shape
+        return (x - 2*self.edge, y - 2*self.edge)
