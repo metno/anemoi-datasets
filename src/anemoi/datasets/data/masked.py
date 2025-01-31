@@ -179,18 +179,27 @@ class Cropping(Masked):
 class TrimEdge(Masked):
 
     def __init__(self, forward, edge):
-        self.edge = edge
+        if isinstance(edge, int):
+            self.edge = [edge] * 4
+        elif len(edge) == 4:
+            self.edge = edge
+        else:
+            raise ValueError("'edge' must be an integer or a list of 4 integers")
 
         shape = forward.field_shape
         if len(shape) != 2:
             raise ValueError("TrimEdge only works on regular grids")
 
+        if self.edge[0] + self.edge[1] >= shape[0]:
+            raise ValueError("Too much triming of the first grid dimension, resulting in an empty dataset")
+        if self.edge[2] + self.edge[3] >= shape[1]:
+            raise ValueError("Too much triming of the second grid dimension, resulting in an empty dataset")
+
         mask = np.full(shape, True, dtype=bool)
-        if edge > 0:
-            mask[0:edge, :] = False
-            mask[-edge:, :] = False
-            mask[:, 0:edge] = False
-            mask[:, -edge:] = False
+        mask[0:self.edge[0], :] = False
+        mask[-self.edge[1]:, :] = False
+        mask[:, 0:self.edge[2]] = False
+        mask[:, -self.edge[3]:] = False
 
         mask = mask.flatten()
 
@@ -210,4 +219,6 @@ class TrimEdge(Masked):
     @property
     def field_shape(self):
         x, y = self.forward.field_shape
-        return (x - 2*self.edge, y - 2*self.edge)
+        x -= (self.edge[0] + self.edge[1])
+        y -= (self.edge[2] + self.edge[3])
+        return x, y
