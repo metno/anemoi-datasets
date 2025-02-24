@@ -18,6 +18,7 @@ import shutil
 import socket
 
 import numpy as np
+import tqdm
 from anemoi.utils.provenance import gather_provenance_info
 
 from ..check import check_data_values
@@ -26,7 +27,7 @@ from .summary import Summary
 LOG = logging.getLogger(__name__)
 
 
-def default_statistics_dates(dates):
+def default_statistics_dates(dates) -> tuple:
     """Calculate default statistics dates based on the given list of dates.
 
     Args:
@@ -134,7 +135,7 @@ def check_variance(x, variables_names, minimum, maximum, mean, count, sums, squa
 
 def compute_statistics(array, check_variables_names=None, allow_nans=False):
     """Compute statistics for a given array, provides minimum, maximum, sum, squares, count and has_nans as a dictionary."""
-
+    LOG.info(f"Computing statistics for {array.shape} array")
     nvars = array.shape[1]
 
     LOG.debug(f"Stats {nvars}, {array.shape}, {check_variables_names}")
@@ -149,7 +150,7 @@ def compute_statistics(array, check_variables_names=None, allow_nans=False):
     maximum = np.zeros(stats_shape, dtype=np.float64)
     has_nans = np.zeros(stats_shape, dtype=np.bool_)
 
-    for i, chunk in enumerate(array):
+    for i, chunk in tqdm.tqdm(enumerate(array), delay=1, total=array.shape[0], desc="Computing statistics"):
         values = chunk.reshape((nvars, -1))
 
         for j, name in enumerate(check_variables_names):
@@ -165,6 +166,8 @@ def compute_statistics(array, check_variables_names=None, allow_nans=False):
         squares[i] = np.nansum(values * values, axis=1)
         count[i] = np.sum(~np.isnan(values), axis=1)
         has_nans[i] = np.isnan(values).any()
+
+    LOG.info(f"Statistics computed for {nvars} variables.")
 
     return {
         "minimum": minimum,
@@ -236,16 +239,6 @@ class TmpStatistics:
         return f"TmpStatistics({self.dirname})"
 
 
-def normalise_date(d):
-    if isinstance(d, str):
-        d = np.datetime64(d)
-    return d
-
-
-def normalise_dates(dates):
-    return [normalise_date(d) for d in dates]
-
-
 class StatAggregator:
     NAMES = ["minimum", "maximum", "sums", "squares", "count", "has_nans"]
 
@@ -255,10 +248,12 @@ class StatAggregator:
         assert dates, "No dates selected"
         self.owner = owner
         self.dates = dates
+        self._number_of_dates = len(dates)
+        self._set_of_dates = set(dates)
         self.variables_names = variables_names
         self.allow_nans = allow_nans
 
-        self.shape = (len(self.dates), len(self.variables_names))
+        self.shape = (self._number_of_dates, len(self.variables_names))
         LOG.debug(f"Aggregating statistics on shape={self.shape}. Variables : {self.variables_names}")
 
         self.minimum = np.full(self.shape, np.nan, dtype=np.float64)
@@ -272,10 +267,12 @@ class StatAggregator:
 
     def _read(self):
         def check_type(a, b):
-            a = list(a)
-            b = list(b)
-            a = a[0] if a else None
-            b = b[0] if b else None
+            if not isinstance(a, set):
+                a = set(list(a))
+            if not isinstance(b, set):
+                b = set(list(b))
+            a = next(iter(a)) if a else None
+            b = next(iter(b)) if b else None
             assert type(a) is type(b), (type(a), type(b))
 
         found = set()
@@ -291,20 +288,20 @@ class StatAggregator:
             for n in self.NAMES:
                 assert n in stats, (n, list(stats.keys()))
             _dates = to_datetimes(_dates)
-            check_type(_dates, self.dates)
+            check_type(_dates, self._set_of_dates)
             if found:
-                check_type(found, self.dates)
+                check_type(found, self._set_of_dates)
                 assert found.isdisjoint(_dates), "Duplicate dates found in precomputed statistics"
 
             # filter dates
-            dates = set(_dates) & set(self.dates)
+            dates = set(_dates) & self._set_of_dates
 
             if not dates:
                 # dates have been completely filtered for this chunk
                 continue
 
             # filter data
-            bitmap = np.isin(_dates, self.dates)
+            bitmap = np.array([d in self._set_of_dates for d in _dates])
             for k in self.NAMES:
                 stats[k] = stats[k][bitmap]
 
@@ -320,8 +317,8 @@ class StatAggregator:
 
         for d in self.dates:
             assert d in found, f"Statistics for date {d} not precomputed."
-        assert len(self.dates) == len(found), "Not all dates found in precomputed statistics"
-        assert len(self.dates) == offset, "Not all dates found in precomputed statistics."
+        assert self._number_of_dates == len(found), "Not all dates found in precomputed statistics"
+        assert self._number_of_dates == offset, "Not all dates found in precomputed statistics."
         LOG.debug(f"Statistics for {len(found)} dates found.")
 
     def aggregate(self):
