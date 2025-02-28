@@ -222,3 +222,7 @@ class TrimEdge(Masked):
         x -= (self.edge[0] + self.edge[1])
         y -= (self.edge[2] + self.edge[3])
         return x, y
+    
+    @property
+    def grids(self):
+        return (np.prod(self.field_shape),)
