@@ -61,21 +61,14 @@ case, the bounding box of the dataset will be used.
 .. literalinclude:: code/area2_.py
    :language: python
 
-*****************
- maskfromdataset
-*****************
-
-Add the ``maskfromdataset`` to ``open_dataset`` to mask an area based on the values of a field in
-another dataset. The name of the field is specified by ``field_name``. By default, when the field is
-0 or less, the gridpoint will be retained.
-
 **********
- trimedge
+ trim_edge
 **********
 
-You can remove the edges of a limited area domain by specifying ``trimedge`` parameter in the
+You can remove the edges of a limited area domain by specifying ``trim_edge`` parameter in the
 ``open_dataset`` function. This can either be an integer, representing the number of gridpoints to
-remove along each edge, or a tuple of four integers in the order ``(lower_dim0, upper_dim0, lower_dim1, upper_dim1)``.
+remove along each edge, or a tuple of four integers in the order
+``(lower_dim0, upper_dim0, lower_dim1, upper_dim1)``.
 
 That is, the following
 
@@ -85,3 +78,5 @@ That is, the following
 will remove the first 3 and last 10 rows of the domain, and the first 4 and last 2 columns of the
 domain. If the first dimension of the grid is the y-dimension (i.e north/south), then 3 gridpoints
 in the south, 10 in the north, 4 in the west and 10 in the east will be removed.
+
+Note that if ``thinning`` is also specified, ``trim_edge`` is applied first.

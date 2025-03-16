@@ -218,56 +218,6 @@ class Thinning(Masked):
         return self.new_field_shape
 
 
-class MaskFromDataset(Masked):
-
-    def __init__(self, forward, dataset, field_name, threshold=0):
-        from ..data import open_dataset
-
-        self.dataset = open_dataset(dataset)
-        if field_name not in self.dataset.dataset_metadata()["variables"]:
-            raise ValueError(f"'{field_name}' is not a variable in the mask dataset")
-
-        self.field_name = field_name
-        self.threshold = threshold
-
-        index = self.dataset.dataset_metadata()["variables"].index(field_name)
-        mask = (self.dataset.data[0, index, 0, :] > threshold).astype(bool)
-
-        super().__init__(forward, mask)
-
-    def tree(self):
-        """Get the tree representation of the dataset.
-
-        Returns
-        -------
-        Node
-            The tree representation of the dataset.
-        """
-        return Node(
-            self, [self.forward.tree()], dataset=self.dataset, field_name=self.field_name, threshold=self.threshold
-        )
-
-    def forwards_subclass_metadata_specific(self) -> Dict[str, Any]:
-        """Get the metadata specific to the MaskFromDataset subclass.
-
-        Returns
-        -------
-        Dict[str, Any]
-            The metadata specific to the MaskFromDataset subclass.
-        """
-        return dict(dataset=self.dataset, field_name=self.field_name, threshold=self.threshold)
-
-    @property
-    def field_shape(self):
-        """Returns the field shape of the dataset."""
-        return (np.sum(self.mask),)
-
-    @property
-    def grids(self):
-        """Returns the grids of the forward dataset."""
-        return (np.sum(self.mask),)
-
-
 class Cropping(Masked):
     """A class to represent a cropped dataset."""
 

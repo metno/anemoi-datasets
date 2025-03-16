@@ -237,18 +237,19 @@ class Dataset(ABC, Sized):
 
             return Statistics(self, open_dataset(statistics))._subset(**kwargs).mutate()
 
+        if "trim_edge" in kwargs:
+            # Note: trim_edge should go before thinning
+            from .masked import TrimEdge
+
+            edge = kwargs.pop("trim_edge")
+            return TrimEdge(self, edge)._subset(**kwargs).mutate()
+
         if "thinning" in kwargs:
             from .masked import Thinning
 
             thinning = kwargs.pop("thinning")
             method = kwargs.pop("method", "every-nth")
             return Thinning(self, thinning, method)._subset(**kwargs).mutate()
-
-        if "trim_edge" in kwargs:
-            from .masked import TrimEdge
-
-            edge = kwargs.pop("trim_edge")
-            return TrimEdge(self, edge)._subset(**kwargs).mutate()
 
         if "area" in kwargs:
             from .masked import Cropping
@@ -265,14 +266,6 @@ class Dataset(ABC, Sized):
                     members[key] = kwargs.pop(key)
 
             return Number(self, **members)._subset(**kwargs).mutate()
-        if "mask_from_dataset" in kwargs:
-            from .masked import MaskFromDataset
-
-            opts = kwargs.pop("mask_from_dataset")
-            dataset = opts.pop("dataset")
-            field = opts.pop("field")
-            threshold = opts.pop("threshold", 0)
-            return MaskFromDataset(self, dataset, field, threshold)._subset(**kwargs).mutate()
 
         if "set_missing_dates" in kwargs:
             from .missing import MissingDates
