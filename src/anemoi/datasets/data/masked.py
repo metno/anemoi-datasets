@@ -273,10 +273,14 @@ class TrimEdge(Masked):
     def __init__(self, forward, edge):
         if isinstance(edge, int):
             self.edge = [edge] * 4
-        elif len(edge) == 4:
+        elif isinstance(edge, list) and len(edge) == 4:
             self.edge = edge
         else:
             raise ValueError("'edge' must be an integer or a list of 4 integers")
+
+        for e in self.edge:
+            if not isinstance(e, int) or e < 0:
+                raise ValueError("'edge' must be integer(s) 0 or greater")
 
         shape = forward.field_shape
         if len(shape) != 2:
@@ -289,9 +293,11 @@ class TrimEdge(Masked):
 
         mask = np.full(shape, True, dtype=bool)
         mask[0:self.edge[0], :] = False
-        mask[-self.edge[1]:, :] = False
         mask[:, 0:self.edge[2]] = False
-        mask[:, -self.edge[3]:] = False
+        if self.edge[1] != 0:
+            mask[-self.edge[1]:, :] = False
+        if self.edge[3] != 0:
+            mask[:, -self.edge[3]:] = False
 
         mask = mask.flatten()
 
