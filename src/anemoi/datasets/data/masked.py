@@ -224,19 +224,35 @@ class MaskFromDataset(Masked):
         super().__init__(forward, mask)
 
     def tree(self):
+        """Get the tree representation of the dataset.
+
+        Returns
+        -------
+        Node
+            The tree representation of the dataset.
+        """
         return Node(
             self, [self.forward.tree()], dataset=self.dataset, field_name=self.field_name, threshold=self.threshold
         )
 
-    def subclass_metadata_specific(self):
+    def forwards_subclass_metadata_specific(self) -> Dict[str, Any]:
+        """Get the metadata specific to the MaskFromDataset subclass.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The metadata specific to the MaskFromDataset subclass.
+        """
         return dict(dataset=self.dataset, field_name=self.field_name, threshold=self.threshold)
 
     @property
     def field_shape(self):
+        """Returns the field shape of the dataset."""
         return (np.sum(self.mask),)
 
     @property
     def grids(self):
+        """Returns the grids of the forward dataset."""
         return (np.sum(self.mask),)
 
 
@@ -320,18 +336,40 @@ class TrimEdge(Masked):
         super().__init__(forward, mask)
 
     def mutate(self) -> Dataset:
+        """Mutate the dataset.
+
+        Returns
+        -------
+        Dataset
+            The mutated dataset.
+        """
         if self.edge is None:
             return self.forward.mutate()
         return super().mutate()
 
     def tree(self):
+        """Get the tree representation of the dataset.
+
+        Returns
+        -------
+        Node
+            The tree representation of the dataset.
+        """
         return Node(self, [self.forward.tree()], edge=self.edge)
 
-    def subclass_metadata_specific(self):
+    def forwards_subclass_metadata_specific(self) -> Dict[str, Any]:
+        """Get the metadata specific to the TrimEdge subclass.
+
+        Returns
+        -------
+        Dict[str, Any]
+            The metadata specific to the TrimEdge subclass.
+        """
         return dict(edge=self.edge)
 
     @property
     def field_shape(self):
+        """Returns the field shape of the dataset."""
         x, y = self.forward.field_shape
         x -= (self.edge[0] + self.edge[1])
         y -= (self.edge[2] + self.edge[3])
