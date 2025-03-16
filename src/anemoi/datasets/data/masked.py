@@ -149,6 +149,8 @@ class Thinning(Masked):
         self.thinning = thinning
         self.method = method
 
+        self.new_field_shape = forward.field_shape
+
         if thinning is not None:
 
             shape = forward.field_shape
@@ -161,8 +163,13 @@ class Thinning(Masked):
 
             latitudes = forward_latitudes.reshape(shape)
             longitudes = forward_longitudes.reshape(shape)
-            latitudes = latitudes[::thinning, ::thinning].flatten()
-            longitudes = longitudes[::thinning, ::thinning].flatten()
+            thinned_latitudes = latitudes[::thinning, ::thinning]
+            thinned_longitudes = longitudes[::thinning, ::thinning]
+
+            self.new_field_shape = thinned_latitudes.shape
+
+            latitudes = thinned_latitudes.flatten()
+            longitudes = thinned_longitudes.flatten()
 
             # TODO: This is not very efficient
 
@@ -204,6 +211,11 @@ class Thinning(Masked):
             The metadata specific to the Thinning subclass.
         """
         return dict(thinning=self.thinning, method=self.method)
+
+    @property
+    def field_shape(self):
+        """Returns the field shape of the dataset."""
+        return self.new_field_shape
 
 
 class MaskFromDataset(Masked):
