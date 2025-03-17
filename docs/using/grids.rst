@@ -60,3 +60,12 @@ case, the bounding box of the dataset will be used.
 
 .. literalinclude:: code/area2_.py
    :language: python
+
+*****************
+ maskfromdataset
+*****************
+
+Add the ``maskfromdataset`` to ``open_dataset`` to mask an area based on the values of a field in
+another dataset. The name of the field is specified by ``field_name``. By default, when the field is
+0 or less, the gridpoint will be retained.
+
